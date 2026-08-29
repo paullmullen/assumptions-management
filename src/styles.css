@@ -1,0 +1,73 @@
+:root {
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  color: #18231f;
+  background: #f4f7f5;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  min-width: 320px;
+}
+.app-layout {
+  min-height: 100vh;
+  background: #f4f7f5;
+}
+.app-header {
+  height: auto;
+  min-height: 64px;
+  padding: 12px clamp(16px, 4vw, 64px);
+  background: #173b31;
+  line-height: normal;
+}
+.header-content {
+  width: 100%;
+  justify-content: space-between;
+}
+.product-name,
+.active-project {
+  color: white;
+}
+.product-name {
+  font-size: 18px;
+  font-weight: 700;
+}
+.active-project {
+  margin-left: auto;
+}
+.project-switcher {
+  min-width: 190px;
+}
+.content {
+  width: min(1120px, 100%);
+  margin: 0 auto;
+  padding: 40px 24px;
+}
+.two-column {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+}
+.auth-page,
+.loading-page {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+  background: #f4f7f5;
+}
+.auth-card {
+  width: min(100%, 440px);
+}
+.auth-links {
+  margin-top: 12px;
+}
+@media (max-width: 720px) {
+  .two-column {
+    grid-template-columns: 1fr;
+  }
+  .active-project {
+    margin-left: 0;
+  }
+}
