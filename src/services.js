@@ -6,9 +6,59 @@ import {
   getDocs,
   serverTimestamp,
   setDoc,
+  updateDoc,
   writeBatch,
 } from "firebase/firestore";
 import { db } from "./firebase.js";
+
+export async function loadProjectBrief(projectId) {
+  const briefRef = doc(db, "projects", projectId, "projectBrief", "overview");
+
+  const snapshot = await getDoc(briefRef);
+
+  if (!snapshot.exists()) {
+    return {
+      customerPromise: "",
+      investorPromise: "",
+      coworkerPromise: "",
+    };
+  }
+
+  return snapshot.data();
+}
+
+export async function updateAssumption(
+  user,
+  projectId,
+  assumptionId,
+  statement,
+) {
+  const assumptionRef = doc(
+    db,
+    "projects",
+    projectId,
+    "assumptions",
+    assumptionId,
+  );
+
+  await updateDoc(assumptionRef, {
+    statement: statement.trim(),
+    updatedAt: serverTimestamp(),
+    updatedBy: user.uid,
+  });
+}
+
+export async function saveProjectBrief(projectId, userId, promises) {
+  const briefRef = doc(db, "projects", projectId, "projectBrief", "overview");
+
+  await setDoc(briefRef, {
+    customerPromise: promises.customerPromise.trim(),
+    investorPromise: promises.investorPromise.trim(),
+    coworkerPromise: promises.coworkerPromise.trim(),
+    updatedAt: serverTimestamp(),
+    updatedBy: userId,
+  });
+}
 
 export async function ensureUserProfile(user) {
   const profileRef = doc(db, "users", user.uid);

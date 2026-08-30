@@ -72,6 +72,35 @@ service cloud.firestore {
       allow read: if isActiveMember(projectId);
       allow update, delete: if false;
 
+      match /projectBrief/{briefId} {
+        allow read: if isActiveMember(projectId);
+        allow create, update: if isActiveMember(projectId)
+          && briefId == 'overview'
+          && request.resource.data.keys().hasOnly([
+            'customerPromise',
+            'investorPromise',
+            'coworkerPromise',
+            'updatedAt',
+            'updatedBy'
+          ])
+          && request.resource.data.keys().hasAll([
+            'customerPromise',
+            'investorPromise',
+            'coworkerPromise',
+            'updatedAt',
+            'updatedBy'
+          ])
+          && request.resource.data.customerPromise is string
+          && request.resource.data.customerPromise.size() <= 4000
+          && request.resource.data.investorPromise is string
+          && request.resource.data.investorPromise.size() <= 4000
+          && request.resource.data.coworkerPromise is string
+          && request.resource.data.coworkerPromise.size() <= 4000
+          && request.resource.data.updatedAt is timestamp
+          && request.resource.data.updatedBy == request.auth.uid;
+        allow delete: if false;
+      }
+
       match /assumptions/{assumptionId} {
         allow read: if isActiveMember(projectId);
         allow create: if isActiveMember(projectId)
@@ -82,8 +111,35 @@ service cloud.firestore {
           && request.resource.data.statement.size() <= 2000
           && request.resource.data.createdBy == request.auth.uid
           && request.resource.data.createdAt is timestamp;
-        allow update, delete: if false;
-      }
-    }
-  }
+        allow update: if isActiveMember(projectId)
+          && request.resource.data.keys().hasOnly([
+            'statement',
+            'createdBy',
+            'createdAt',
+            'updatedAt',
+            'updatedBy'
+          ])
+          && request.resource.data.keys().hasAll([
+            'statement',
+            'createdBy',
+            'createdAt',
+            'updatedAt',
+            'updatedBy'
+          ])
+          && request.resource.data.statement is string
+          && request.resource.data.statement.size() > 0
+          && request.resource.data.statement.size() <= 2000
+          && request.resource.data.createdBy == resource.data.createdBy
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.updatedBy == request.auth.uid
+          && request.resource.data.updatedAt is timestamp
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'statement',
+            'updatedAt',
+            'updatedBy'
+          ]);
+
+        allow delete: if false;      }
+            }
+          }
 }

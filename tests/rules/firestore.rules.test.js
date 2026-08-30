@@ -38,6 +38,16 @@ function membership(projectKey, userId, role = "owner") {
   };
 }
 
+function projectBrief(updatedBy = ownerId) {
+  return {
+    customerPromise: "Customers will complete the process more quickly.",
+    investorPromise: "The project will produce a sustainable return.",
+    coworkerPromise: "The team will have a healthy working environment.",
+    updatedAt: Timestamp.now(),
+    updatedBy,
+  };
+}
+
 function verifiedContext(userId) {
   return testEnv.authenticatedContext(userId, { email_verified: true });
 }
@@ -232,6 +242,54 @@ describe("Slice 1 Firestore security rules", () => {
     await assertSucceeds(getDoc(assumption));
   });
 
+  it("allows an active member to save and revise the project brief", async () => {
+    await seedPrivateProject();
+
+    const firestore = verifiedContext(ownerId).firestore();
+    const briefRef = doc(
+      firestore,
+      "projects",
+      projectId,
+      "projectBrief",
+      "overview",
+    );
+
+    await assertSucceeds(setDoc(briefRef, projectBrief()));
+    await assertSucceeds(
+      setDoc(briefRef, {
+        ...projectBrief(),
+        customerPromise:
+          "Customers will complete the process more confidently.",
+      }),
+    );
+    await assertSucceeds(getDoc(briefRef));
+  });
+
+  it("denies nonmember access and false attribution on project briefs", async () => {
+    await seedPrivateProject();
+
+    const ownerFirestore = verifiedContext(ownerId).firestore();
+    const otherFirestore = verifiedContext(otherUserId).firestore();
+    const ownerBriefRef = doc(
+      ownerFirestore,
+      "projects",
+      projectId,
+      "projectBrief",
+      "overview",
+    );
+    const otherBriefRef = doc(
+      otherFirestore,
+      "projects",
+      projectId,
+      "projectBrief",
+      "overview",
+    );
+
+    await assertFails(setDoc(ownerBriefRef, projectBrief(otherUserId)));
+    await assertFails(setDoc(otherBriefRef, projectBrief(otherUserId)));
+    await assertFails(getDoc(otherBriefRef));
+  });
+
   it("denies unverified and nonmember project discovery, reads, queries, and writes", async () => {
     await seedPrivateProject();
     const unverified = testEnv.authenticatedContext("unverified").firestore();
@@ -256,6 +314,96 @@ describe("Slice 1 Firestore security rules", () => {
         statement: "I should not be able to add this.",
         createdBy: otherUserId,
         createdAt: Timestamp.now(),
+      }),
+    );
+  });
+
+  it("allows an active member to edit an assumption without changing its identity", async () => {
+    await seedPrivateProject();
+
+    const firestore = verifiedContext(ownerId).firestore();
+    const assumptionRef = doc(
+      firestore,
+      "projects",
+      projectId,
+      "assumptions",
+      "editable-assumption",
+    );
+
+    await assertSucceeds(
+      setDoc(assumptionRef, {
+        statement: "Customers will complete the workflow successfully.",
+        createdBy: ownerId,
+        createdAt: Timestamp.now(),
+      }),
+    );
+
+    await assertSucceeds(
+      updateDoc(assumptionRef, {
+        statement: "Customers will complete the workflow without assistance.",
+        updatedAt: Timestamp.now(),
+        updatedBy: ownerId,
+      }),
+    );
+
+    const snapshot = await getDoc(assumptionRef);
+
+    expect(snapshot.data().statement).toBe(
+      "Customers will complete the workflow without assistance.",
+    );
+    expect(snapshot.data().createdBy).toBe(ownerId);
+  });
+  it("rejects nonmember edits and changes to assumption identity", async () => {
+    await seedPrivateProject();
+
+    const ownerFirestore = verifiedContext(ownerId).firestore();
+    const otherFirestore = verifiedContext(otherUserId).firestore();
+
+    const ownerAssumptionRef = doc(
+      ownerFirestore,
+      "projects",
+      projectId,
+      "assumptions",
+      "protected-assumption",
+    );
+
+    const otherAssumptionRef = doc(
+      otherFirestore,
+      "projects",
+      projectId,
+      "assumptions",
+      "protected-assumption",
+    );
+
+    await assertSucceeds(
+      setDoc(ownerAssumptionRef, {
+        statement: "Customers will adopt the new process.",
+        createdBy: ownerId,
+        createdAt: Timestamp.now(),
+      }),
+    );
+
+    await assertFails(
+      updateDoc(ownerAssumptionRef, {
+        createdBy: otherUserId,
+        updatedAt: Timestamp.now(),
+        updatedBy: ownerId,
+      }),
+    );
+
+    await assertFails(
+      updateDoc(ownerAssumptionRef, {
+        statement: "A falsely attributed edit.",
+        updatedAt: Timestamp.now(),
+        updatedBy: otherUserId,
+      }),
+    );
+
+    await assertFails(
+      updateDoc(otherAssumptionRef, {
+        statement: "A nonmember edit.",
+        updatedAt: Timestamp.now(),
+        updatedBy: otherUserId,
       }),
     );
   });

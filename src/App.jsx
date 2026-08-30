@@ -8,7 +8,7 @@ import {
   Form,
   Input,
   Layout,
-  List,
+  Listy,
   Select,
   Space,
   Spin,
@@ -22,6 +22,7 @@ import {
   signInWithEmailAndPassword,
   signOut,
 } from "firebase/auth";
+import ProjectBriefCard from "./features/projectBrief/ProjectBriefCard.jsx";
 import { auth, isFirebaseConfigured } from "./firebase.js";
 import { authenticationErrorMessage } from "./authErrors.js";
 import {
@@ -30,7 +31,12 @@ import {
   ensureUserProfile,
   loadAssumptions,
   loadProjects,
+  updateAssumption,
 } from "./services.js";
+import {
+  refreshVerificationState,
+  sendVerificationEmail,
+} from "./verification.js";
 
 const { Header, Content } = Layout;
 const { Title, Text, Paragraph } = Typography;
@@ -55,8 +61,8 @@ function AuthScreen() {
           values.email,
           values.password,
         );
+        await sendVerificationEmail(credential.user);
         await ensureUserProfile(credential.user);
-        await sendEmailVerification(credential.user);
         message.success(
           "Verification email sent. Verify your email, then sign in.",
         );
@@ -148,6 +154,41 @@ function AuthScreen() {
   );
 }
 
+function VerificationScreen({ user }) {
+  const { message } = AntApp.useApp();
+  const [busy, setBusy] = useState(false);
+
+  async function resend() {
+    setBusy(true);
+    try {
+      await sendVerificationEmail(user);
+      message.success("A new verification email has been sent.");
+    } catch (error) {
+      message.error(authenticationErrorMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <main className="auth-page">
+      <Card className="auth-card">
+        <Title level={2}>Verify your email</Title>
+        <Paragraph>
+          Check your inbox for the Firebase verification link, then sign in
+          again. If it has not arrived, request another email below.
+        </Paragraph>
+        <Space wrap>
+          <Button loading={busy} onClick={resend} type="primary">
+            Resend verification email
+          </Button>
+          <Button onClick={() => signOut(auth)}>Sign out</Button>
+        </Space>
+      </Card>
+    </main>
+  );
+}
+
 function ProjectHeader({ projects, projectId, onSelect, onSignOut }) {
   const activeProject = projects.find((project) => project.id === projectId);
   return (
@@ -226,22 +267,30 @@ function ProjectSelector({ projects, onOpen, onCreate }) {
           {projects.length === 0 ? (
             <Empty description="No projects yet" />
           ) : (
-            <List
-              dataSource={projects}
-              renderItem={(project) => (
-                <List.Item
-                  actions={[
-                    <Button key="open" onClick={() => onOpen(project.id)}>
-                      Open
-                    </Button>,
-                  ]}
+            <Listy
+              itemRender={(project) => (
+                <div
+                  style={{
+                    alignItems: "center",
+                    display: "flex",
+                    gap: 16,
+                    justifyContent: "space-between",
+                    padding: "12px 0",
+                  }}
                 >
-                  <List.Item.Meta
-                    description={project.description || "No description"}
-                    title={project.name}
-                  />
-                </List.Item>
+                  <div>
+                    <Text strong>{project.name}</Text>
+                    <br />
+                    <Text type="secondary">
+                      {project.description || "No description"}
+                    </Text>
+                  </div>
+
+                  <Button onClick={() => onOpen(project.id)}>Open</Button>
+                </div>
               )}
+              items={projects}
+              rowKey="id"
             />
           )}
         </Card>
@@ -257,6 +306,10 @@ function ProjectScreen({ user, project, onBack }) {
   const [busy, setBusy] = useState(false);
   const [form] = Form.useForm();
 
+  const [editingAssumptionId, setEditingAssumptionId] = useState(null);
+  const [editingStatement, setEditingStatement] = useState("");
+  const [editBusy, setEditBusy] = useState(false);
+
   useEffect(() => {
     let active = true;
     loadAssumptions(project.id)
@@ -267,6 +320,39 @@ function ProjectScreen({ user, project, onBack }) {
       active = false;
     };
   }, [message, project.id]);
+
+  function startEditing(assumption) {
+    setEditingAssumptionId(assumption.id);
+    setEditingStatement(assumption.statement);
+  }
+
+  function cancelEditing() {
+    setEditingAssumptionId(null);
+    setEditingStatement("");
+  }
+
+  async function saveAssumptionEdit(assumptionId) {
+    const statement = editingStatement.trim();
+
+    if (!statement) {
+      message.warning("Enter an affirmative assumption statement.");
+      return;
+    }
+
+    setEditBusy(true);
+
+    try {
+      await updateAssumption(user, project.id, assumptionId, statement);
+      setAssumptions(await loadAssumptions(project.id));
+      cancelEditing();
+      message.success("Assumption updated.");
+    } catch (error) {
+      console.error("Failed to update assumption:", error);
+      message.error("The assumption could not be updated.");
+    } finally {
+      setEditBusy(false);
+    }
+  }
 
   async function submit(values) {
     setBusy(true);
@@ -289,6 +375,7 @@ function ProjectScreen({ user, project, onBack }) {
       </Button>
       <Title level={1}>{project.name}</Title>
       {project.description && <Paragraph>{project.description}</Paragraph>}
+      <ProjectBriefCard projectId={project.id} userId={user.uid} />
       <div className="two-column">
         <Card title="Add a basic assumption">
           <Paragraph>
@@ -305,6 +392,7 @@ function ProjectScreen({ user, project, onBack }) {
               label="Assumption"
               name="statement"
               rules={[{ required: true, whitespace: true, max: 2000 }]}
+              extra="State the assumption affirmatively as something that is true or must become true."
             >
               <Input.TextArea maxLength={2000} rows={4} />
             </Form.Item>
@@ -317,13 +405,80 @@ function ProjectScreen({ user, project, onBack }) {
           {loading ? (
             <Spin />
           ) : (
-            <List
-              dataSource={assumptions}
-              locale={{ emptyText: "No assumptions yet" }}
-              renderItem={(assumption) => (
-                <List.Item>{assumption.statement}</List.Item>
+            <>
+              {assumptions.length === 0 ? (
+                <Empty description="No assumptions yet" />
+              ) : (
+                <Listy
+                  itemRender={(assumption) => {
+                    const isEditing = editingAssumptionId === assumption.id;
+
+                    return (
+                      <div style={{ padding: "12px 0", width: "100%" }}>
+                        {isEditing ? (
+                          <Space
+                            orientation="vertical"
+                            style={{ width: "100%" }}
+                          >
+                            <Input.TextArea
+                              autoSize={{ minRows: 2, maxRows: 6 }}
+                              maxLength={2000}
+                              onChange={(event) =>
+                                setEditingStatement(event.target.value)
+                              }
+                              value={editingStatement}
+                            />
+
+                            <Text type="secondary">
+                              State the assumption affirmatively as something
+                              that is true or must become true.
+                            </Text>
+
+                            <Space>
+                              <Button
+                                loading={editBusy}
+                                onClick={() =>
+                                  saveAssumptionEdit(assumption.id)
+                                }
+                                type="primary"
+                              >
+                                Save
+                              </Button>
+
+                              <Button
+                                disabled={editBusy}
+                                onClick={cancelEditing}
+                              >
+                                Cancel
+                              </Button>
+                            </Space>
+                          </Space>
+                        ) : (
+                          <div
+                            style={{
+                              alignItems: "start",
+                              display: "flex",
+                              gap: 16,
+                              justifyContent: "space-between",
+                            }}
+                          >
+                            <Paragraph style={{ margin: 0 }}>
+                              {assumption.statement}
+                            </Paragraph>
+
+                            <Button onClick={() => startEditing(assumption)}>
+                              Edit
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }}
+                  items={assumptions}
+                  rowKey="id"
+                />
               )}
-            />
+            </>
           )}
         </Card>
       </div>
@@ -349,10 +504,10 @@ function Application() {
         return;
       }
 
-      await nextUser.reload();
+      const isVerified = await refreshVerificationState(nextUser);
       const refreshedUser = auth.currentUser;
       setUser(refreshedUser);
-      if (refreshedUser?.emailVerified) {
+      if (isVerified && refreshedUser) {
         setProjectsLoading(true);
         try {
           setProjects(await loadProjects(refreshedUser));
@@ -417,20 +572,7 @@ function Application() {
       </main>
     );
   if (!user) return <AuthScreen />;
-  if (!user.emailVerified) {
-    return (
-      <main className="auth-page">
-        <Card className="auth-card">
-          <Title level={2}>Verify your email</Title>
-          <Paragraph>
-            Check your inbox for the Firebase verification link, then sign in
-            again.
-          </Paragraph>
-          <Button onClick={() => signOut(auth)}>Sign out</Button>
-        </Card>
-      </main>
-    );
-  }
+  if (!user.emailVerified) return <VerificationScreen user={user} />;
 
   return (
     <Layout className="app-layout">
