@@ -23,16 +23,10 @@ import {
   signOut,
 } from "firebase/auth";
 import ProjectBriefCard from "./features/projectBrief/ProjectBriefCard.jsx";
+import AssumptionsPanel from "./features/assumptions/AssumptionsPanel.jsx";
 import { auth, isFirebaseConfigured } from "./firebase.js";
 import { authenticationErrorMessage } from "./authErrors.js";
-import {
-  addBasicAssumption,
-  createProject,
-  ensureUserProfile,
-  loadAssumptions,
-  loadProjects,
-  updateAssumption,
-} from "./services.js";
+import { createProject, ensureUserProfile, loadProjects } from "./services.js";
 import {
   refreshVerificationState,
   sendVerificationEmail,
@@ -47,10 +41,10 @@ function routeTo(path) {
 }
 
 function AuthScreen() {
-  const { message } = AntApp.useApp();
   const [mode, setMode] = useState("sign-in");
   const [busy, setBusy] = useState(false);
   const [form] = Form.useForm();
+  const { message } = AntApp.useApp();
 
   async function submit(values) {
     setBusy(true);
@@ -189,7 +183,7 @@ function VerificationScreen({ user }) {
   );
 }
 
-function ProjectHeader({ projects, projectId, onSelect, onSignOut }) {
+function ProjectHeader({ projects, projectId, onSelect, onCreate, onSignOut }) {
   const activeProject = projects.find((project) => project.id === projectId);
   return (
     <Header className="app-header">
@@ -211,6 +205,7 @@ function ProjectHeader({ projects, projectId, onSelect, onSignOut }) {
           placeholder="Select a project"
           value={projectId}
         />
+        <Button onClick={onCreate}>Create project</Button>
         <Button onClick={onSignOut}>Sign out</Button>
       </Space>
     </Header>
@@ -301,72 +296,6 @@ function ProjectSelector({ projects, onOpen, onCreate }) {
 
 function ProjectScreen({ user, project, onBack }) {
   const { message } = AntApp.useApp();
-  const [assumptions, setAssumptions] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [form] = Form.useForm();
-
-  const [editingAssumptionId, setEditingAssumptionId] = useState(null);
-  const [editingStatement, setEditingStatement] = useState("");
-  const [editBusy, setEditBusy] = useState(false);
-
-  useEffect(() => {
-    let active = true;
-    loadAssumptions(project.id)
-      .then((items) => active && setAssumptions(items))
-      .catch(() => active && message.error("This project is unavailable."))
-      .finally(() => active && setLoading(false));
-    return () => {
-      active = false;
-    };
-  }, [message, project.id]);
-
-  function startEditing(assumption) {
-    setEditingAssumptionId(assumption.id);
-    setEditingStatement(assumption.statement);
-  }
-
-  function cancelEditing() {
-    setEditingAssumptionId(null);
-    setEditingStatement("");
-  }
-
-  async function saveAssumptionEdit(assumptionId) {
-    const statement = editingStatement.trim();
-
-    if (!statement) {
-      message.warning("Enter an affirmative assumption statement.");
-      return;
-    }
-
-    setEditBusy(true);
-
-    try {
-      await updateAssumption(user, project.id, assumptionId, statement);
-      setAssumptions(await loadAssumptions(project.id));
-      cancelEditing();
-      message.success("Assumption updated.");
-    } catch (error) {
-      console.error("Failed to update assumption:", error);
-      message.error("The assumption could not be updated.");
-    } finally {
-      setEditBusy(false);
-    }
-  }
-
-  async function submit(values) {
-    setBusy(true);
-    try {
-      await addBasicAssumption(user, project.id, values.statement);
-      setAssumptions(await loadAssumptions(project.id));
-      form.resetFields();
-      message.success("Assumption saved.");
-    } catch {
-      message.error("The assumption could not be saved.");
-    } finally {
-      setBusy(false);
-    }
-  }
 
   return (
     <Content className="content">
@@ -376,112 +305,7 @@ function ProjectScreen({ user, project, onBack }) {
       <Title level={1}>{project.name}</Title>
       {project.description && <Paragraph>{project.description}</Paragraph>}
       <ProjectBriefCard projectId={project.id} userId={user.uid} />
-      <div className="two-column">
-        <Card title="Add a basic assumption">
-          <Paragraph>
-            State what is true—or must become true—for this project to deliver
-            its promises.
-          </Paragraph>
-          <Form
-            form={form}
-            layout="vertical"
-            onFinish={submit}
-            requiredMark={false}
-          >
-            <Form.Item
-              label="Assumption"
-              name="statement"
-              rules={[{ required: true, whitespace: true, max: 2000 }]}
-              extra="State the assumption affirmatively as something that is true or must become true."
-            >
-              <Input.TextArea maxLength={2000} rows={4} />
-            </Form.Item>
-            <Button htmlType="submit" loading={busy} type="primary">
-              Save assumption
-            </Button>
-          </Form>
-        </Card>
-        <Card title="Saved assumptions">
-          {loading ? (
-            <Spin />
-          ) : (
-            <>
-              {assumptions.length === 0 ? (
-                <Empty description="No assumptions yet" />
-              ) : (
-                <Listy
-                  itemRender={(assumption) => {
-                    const isEditing = editingAssumptionId === assumption.id;
-
-                    return (
-                      <div style={{ padding: "12px 0", width: "100%" }}>
-                        {isEditing ? (
-                          <Space
-                            orientation="vertical"
-                            style={{ width: "100%" }}
-                          >
-                            <Input.TextArea
-                              autoSize={{ minRows: 2, maxRows: 6 }}
-                              maxLength={2000}
-                              onChange={(event) =>
-                                setEditingStatement(event.target.value)
-                              }
-                              value={editingStatement}
-                            />
-
-                            <Text type="secondary">
-                              State the assumption affirmatively as something
-                              that is true or must become true.
-                            </Text>
-
-                            <Space>
-                              <Button
-                                loading={editBusy}
-                                onClick={() =>
-                                  saveAssumptionEdit(assumption.id)
-                                }
-                                type="primary"
-                              >
-                                Save
-                              </Button>
-
-                              <Button
-                                disabled={editBusy}
-                                onClick={cancelEditing}
-                              >
-                                Cancel
-                              </Button>
-                            </Space>
-                          </Space>
-                        ) : (
-                          <div
-                            style={{
-                              alignItems: "start",
-                              display: "flex",
-                              gap: 16,
-                              justifyContent: "space-between",
-                            }}
-                          >
-                            <Paragraph style={{ margin: 0 }}>
-                              {assumption.statement}
-                            </Paragraph>
-
-                            <Button onClick={() => startEditing(assumption)}>
-                              Edit
-                            </Button>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  }}
-                  items={assumptions}
-                  rowKey="id"
-                />
-              )}
-            </>
-          )}
-        </Card>
-      </div>
+      <AssumptionsPanel projectId={project.id} user={user} />
     </Content>
   );
 }
@@ -527,22 +351,31 @@ function Application() {
     return () => window.removeEventListener("popstate", updatePath);
   }, []);
 
-  const projectId = useMemo(
-    () => pathname.match(/^\/projects\/([^/]+)$/)?.[1],
-    [pathname],
-  );
+  const isCreatingProject = pathname === "/projects/new";
+
+  const projectId = useMemo(() => {
+    if (pathname === "/projects/new") {
+      return undefined;
+    }
+
+    return pathname.match(/^\/projects\/([^/]+)$/)?.[1];
+  }, [pathname]);
+
   const project = projects.find((item) => item.id === projectId);
 
   useEffect(() => {
     if (
       !user?.emailVerified ||
       projectsLoading ||
+      isCreatingProject ||
       projectId ||
       projects.length !== 1
-    )
+    ) {
       return;
+    }
+
     routeTo(`/projects/${projects[0].id}`);
-  }, [user, projectsLoading, projectId, projects]);
+  }, [user, projectsLoading, isCreatingProject, projectId, projects]);
 
   async function createAndOpen(values) {
     try {
@@ -577,6 +410,7 @@ function Application() {
   return (
     <Layout className="app-layout">
       <ProjectHeader
+        onCreate={() => routeTo("/projects/new")}
         onSelect={(id) => routeTo(`/projects/${id}`)}
         onSignOut={() => signOut(auth)}
         projectId={projectId}
