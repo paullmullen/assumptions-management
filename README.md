@@ -1,6 +1,6 @@
 # Assumptions Management
 
-Slice 1 is the authenticated, project-isolated walking skeleton. A verified user can create a private project and add one persistent basic assumption. The application deliberately does **not** include invitations, collaboration, promises, candidate workflows, scoring, charting, evidence, notifications, formal reviews, or Cloud Functions.
+The current application includes verified authentication, isolated private projects, the Three Promises, affirmative assumptions, two-axis scoring, and a synchronized portfolio chart. The chart plots only fully assessed assumptions, keeps unassessed work distinct, and shows the highest unretired risk in the upper-right using labeled diagonal attention bands over the 3×3 qualitative grid.
 
 ## Development setup
 

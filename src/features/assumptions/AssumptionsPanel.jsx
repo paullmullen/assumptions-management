@@ -19,6 +19,7 @@ import {
   updateAssumption,
   updateAssumptionScores,
 } from "../../services.js";
+import PortfolioChart from "../portfolioChart/PortfolioChart.jsx";
 
 const { Paragraph, Text } = Typography;
 
@@ -355,13 +356,15 @@ export default function AssumptionsPanel({ projectId, user }) {
                       <Space wrap>
                         {isAssessed ? (
                           <>
-<Tag color={criticalityColor(assumption.criticality)}>
-  Criticality: {assumption.criticality}
-</Tag>
+                            <Tag
+                              color={criticalityColor(assumption.criticality)}
+                            >
+                              Criticality: {assumption.criticality}
+                            </Tag>
 
-<Tag color={evidenceColor(assumption.evidence)}>
-  Evidence: {assumption.evidence}
-</Tag>
+                            <Tag color={evidenceColor(assumption.evidence)}>
+                              Evidence: {assumption.evidence}
+                            </Tag>
                           </>
                         ) : (
                           <Tag>Not assessed</Tag>
@@ -387,6 +390,8 @@ export default function AssumptionsPanel({ projectId, user }) {
           />
         )}
       </Card>
+
+      {!loading && <PortfolioChart assumptions={assumptions} />}
     </div>
   );
 }
