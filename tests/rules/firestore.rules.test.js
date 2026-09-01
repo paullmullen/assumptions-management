@@ -353,6 +353,132 @@ describe("Slice 1 Firestore security rules", () => {
     );
     expect(snapshot.data().createdBy).toBe(ownerId);
   });
+
+  it("allows an active member to create a scored assumption", async () => {
+    await seedPrivateProject();
+
+    const firestore = verifiedContext(ownerId).firestore();
+    const assumptionRef = doc(
+      firestore,
+      "projects",
+      projectId,
+      "assumptions",
+      "scored-assumption",
+    );
+
+    await assertSucceeds(
+      setDoc(assumptionRef, {
+        statement: "Customers will adopt the new workflow.",
+        criticality: 85,
+        evidence: 30,
+        createdBy: ownerId,
+        createdAt: Timestamp.now(),
+      }),
+    );
+
+    const snapshot = await getDoc(assumptionRef);
+
+    expect(snapshot.data().criticality).toBe(85);
+    expect(snapshot.data().evidence).toBe(30);
+  });
+
+  it("allows an active member to score an existing unscored assumption", async () => {
+    await seedPrivateProject();
+
+    const firestore = verifiedContext(ownerId).firestore();
+    const assumptionRef = doc(
+      firestore,
+      "projects",
+      projectId,
+      "assumptions",
+      "legacy-assumption",
+    );
+
+    await assertSucceeds(
+      setDoc(assumptionRef, {
+        statement: "The implementation partner will meet the schedule.",
+        createdBy: ownerId,
+        createdAt: Timestamp.now(),
+      }),
+    );
+
+    await assertSucceeds(
+      updateDoc(assumptionRef, {
+        criticality: 90,
+        evidence: 20,
+        updatedAt: Timestamp.now(),
+        updatedBy: ownerId,
+      }),
+    );
+
+    const snapshot = await getDoc(assumptionRef);
+
+    expect(snapshot.data().criticality).toBe(90);
+    expect(snapshot.data().evidence).toBe(20);
+    expect(snapshot.data().createdBy).toBe(ownerId);
+  });
+
+  it("rejects invalid assumption scores and unknown fields", async () => {
+    await seedPrivateProject();
+
+    const firestore = verifiedContext(ownerId).firestore();
+
+    const invalidRangeRef = doc(
+      firestore,
+      "projects",
+      projectId,
+      "assumptions",
+      "invalid-range",
+    );
+
+    await assertFails(
+      setDoc(invalidRangeRef, {
+        statement: "This score is too high.",
+        criticality: 101,
+        evidence: 50,
+        createdBy: ownerId,
+        createdAt: Timestamp.now(),
+      }),
+    );
+
+    const decimalRef = doc(
+      firestore,
+      "projects",
+      projectId,
+      "assumptions",
+      "decimal-score",
+    );
+
+    await assertFails(
+      setDoc(decimalRef, {
+        statement: "This score is not an integer.",
+        criticality: 50,
+        evidence: 25.5,
+        createdBy: ownerId,
+        createdAt: Timestamp.now(),
+      }),
+    );
+
+    const unknownFieldRef = doc(
+      firestore,
+      "projects",
+      projectId,
+      "assumptions",
+      "unknown-field",
+    );
+
+    await assertFails(
+      setDoc(unknownFieldRef, {
+        statement: "This contains an unsupported field.",
+        criticality: 50,
+        evidence: 50,
+        unsupported: true,
+        createdBy: ownerId,
+        createdAt: Timestamp.now(),
+      }),
+    );
+  });
+
   it("rejects nonmember edits and changes to assumption identity", async () => {
     await seedPrivateProject();
 

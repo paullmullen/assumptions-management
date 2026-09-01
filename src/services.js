@@ -11,6 +11,41 @@ import {
 } from "firebase/firestore";
 import { db } from "./firebase.js";
 
+export async function updateAssumptionScores(
+  user,
+  projectId,
+  assumptionId,
+  scores,
+) {
+  const { criticality, evidence } = scores;
+
+  if (
+    !Number.isInteger(criticality) ||
+    criticality < 0 ||
+    criticality > 100 ||
+    !Number.isInteger(evidence) ||
+    evidence < 0 ||
+    evidence > 100
+  ) {
+    throw new RangeError("Assumption scores must be integers from 0 to 100.");
+  }
+
+  const assumptionRef = doc(
+    db,
+    "projects",
+    projectId,
+    "assumptions",
+    assumptionId,
+  );
+
+  await updateDoc(assumptionRef, {
+    criticality,
+    evidence,
+    updatedAt: serverTimestamp(),
+    updatedBy: user.uid,
+  });
+}
+
 export async function loadProjectBrief(projectId) {
   const briefRef = doc(db, "projects", projectId, "projectBrief", "overview");
 

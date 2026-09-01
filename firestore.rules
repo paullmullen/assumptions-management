@@ -60,6 +60,20 @@ service cloud.firestore {
       }
     }
 
+    function hasValidOptionalScore(data, field) {
+      return !(field in data)
+        || (
+          data[field] is int
+          && data[field] >= 0
+          && data[field] <= 100
+        );
+    }
+
+    function hasValidAssumptionScores(data) {
+      return hasValidOptionalScore(data, 'criticality')
+        && hasValidOptionalScore(data, 'evidence');
+    }
+
     match /projects/{projectId} {
       allow create: if isVerifiedUser()
         && hasProjectFields(request.resource.data)
@@ -101,45 +115,62 @@ service cloud.firestore {
         allow delete: if false;
       }
 
-      match /assumptions/{assumptionId} {
-        allow read: if isActiveMember(projectId);
-        allow create: if isActiveMember(projectId)
-          && request.resource.data.keys().hasOnly(['statement', 'createdBy', 'createdAt'])
-          && request.resource.data.keys().hasAll(['statement', 'createdBy', 'createdAt'])
-          && request.resource.data.statement is string
-          && request.resource.data.statement.size() > 0
-          && request.resource.data.statement.size() <= 2000
-          && request.resource.data.createdBy == request.auth.uid
-          && request.resource.data.createdAt is timestamp;
-        allow update: if isActiveMember(projectId)
-          && request.resource.data.keys().hasOnly([
-            'statement',
-            'createdBy',
-            'createdAt',
-            'updatedAt',
-            'updatedBy'
-          ])
-          && request.resource.data.keys().hasAll([
-            'statement',
-            'createdBy',
-            'createdAt',
-            'updatedAt',
-            'updatedBy'
-          ])
-          && request.resource.data.statement is string
-          && request.resource.data.statement.size() > 0
-          && request.resource.data.statement.size() <= 2000
-          && request.resource.data.createdBy == resource.data.createdBy
-          && request.resource.data.createdAt == resource.data.createdAt
-          && request.resource.data.updatedBy == request.auth.uid
-          && request.resource.data.updatedAt is timestamp
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'statement',
-            'updatedAt',
-            'updatedBy'
-          ]);
+match /assumptions/{assumptionId} {
+  allow read: if isActiveMember(projectId);
 
-        allow delete: if false;      }
-            }
-          }
+  allow create: if isActiveMember(projectId)
+    && request.resource.data.keys().hasOnly([
+      'statement',
+      'criticality',
+      'evidence',
+      'createdBy',
+      'createdAt'
+    ])
+    && request.resource.data.keys().hasAll([
+      'statement',
+      'createdBy',
+      'createdAt'
+    ])
+    && request.resource.data.statement is string
+    && request.resource.data.statement.size() > 0
+    && request.resource.data.statement.size() <= 2000
+    && hasValidAssumptionScores(request.resource.data)
+    && request.resource.data.createdBy == request.auth.uid
+    && request.resource.data.createdAt is timestamp;
+
+  allow update: if isActiveMember(projectId)
+    && request.resource.data.keys().hasOnly([
+      'statement',
+      'criticality',
+      'evidence',
+      'createdBy',
+      'createdAt',
+      'updatedAt',
+      'updatedBy'
+    ])
+    && request.resource.data.keys().hasAll([
+      'statement',
+      'createdBy',
+      'createdAt',
+      'updatedAt',
+      'updatedBy'
+    ])
+    && request.resource.data.statement is string
+    && request.resource.data.statement.size() > 0
+    && request.resource.data.statement.size() <= 2000
+    && hasValidAssumptionScores(request.resource.data)
+    && request.resource.data.createdBy == resource.data.createdBy
+    && request.resource.data.createdAt == resource.data.createdAt
+    && request.resource.data.updatedBy == request.auth.uid
+    && request.resource.data.updatedAt is timestamp
+    && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+      'statement',
+      'criticality',
+      'evidence',
+      'updatedAt',
+      'updatedBy'
+    ]);
+
+  allow delete: if false;
 }
+    }}}
