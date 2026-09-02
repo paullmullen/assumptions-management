@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { ConfigProvider } from "antd";
+import { useState } from "react";
 import { describe, expect, it } from "vitest";
 import PortfolioChart from "./PortfolioChart.jsx";
 
@@ -23,9 +24,20 @@ const assumptions = [
 ];
 
 function renderChart(items = assumptions) {
+  function Harness() {
+    const [selectedId, onSelect] = useState(null);
+    return (
+      <PortfolioChart
+        assumptions={items}
+        selectedId={selectedId}
+        onSelect={onSelect}
+        onSaveScores={() => {}}
+      />
+    );
+  }
   return render(
     <ConfigProvider>
-      <PortfolioChart assumptions={items} />
+      <Harness />
     </ConfigProvider>,
   );
 }
@@ -50,15 +62,20 @@ describe("portfolio chart", () => {
   it("identifies the full assumption when a chart point is selected", () => {
     const { container } = renderChart();
 
-    fireEvent.click(container.querySelector(".portfolio-point"));
+    fireEvent.click(screen.getByRole("button", { name: /Assumption 1:/ }));
 
     expect(screen.getByText("Selected assumption")).toBeInTheDocument();
     expect(container.querySelector(".portfolio-selection")).toHaveTextContent(
       "Customers will adopt the new workflow.",
     );
-    expect(container.querySelector(".portfolio-selection")).toHaveTextContent(
-      "Criticality 82 · Evidence 18",
-    );
+    expect(
+      screen.getByRole("spinbutton", { name: "Criticality if wrong" }),
+    ).toHaveValue("82");
+    expect(
+      screen.getByRole("spinbutton", {
+        name: "Strength of supporting evidence",
+      }),
+    ).toHaveValue("18");
   });
 
   it("teaches the next action when nothing has been assessed", () => {

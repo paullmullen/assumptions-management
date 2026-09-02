@@ -66,6 +66,15 @@ body {
 .portfolio-card {
   grid-column: 1 / -1;
 }
+.saved-assumption {
+  padding: 12px;
+  width: 100%;
+  border-left: 4px solid transparent;
+}
+.saved-assumption-selected {
+  border-left-color: #1d6a55;
+  background: #edf5f2;
+}
 .portfolio-introduction {
   max-width: 760px;
 }
@@ -221,6 +230,16 @@ body {
   padding: 12px 16px;
   border-left: 4px solid #1d6a55;
   background: #f2f7f5;
+}
+.portfolio-score-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 24px;
+  margin: 12px 0;
+}
+.portfolio-score-fields label {
+  display: block;
+  margin-bottom: 6px;
 }
 .portfolio-selection .ant-typography {
   margin-bottom: 2px;

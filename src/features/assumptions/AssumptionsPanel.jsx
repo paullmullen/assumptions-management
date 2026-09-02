@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   App as AntApp,
   Button,
@@ -48,6 +48,12 @@ function evidenceColor(score) {
 }
 
 export default function AssumptionsPanel({ projectId, user }) {
+  return (
+    <ProjectAssumptions key={projectId} projectId={projectId} user={user} />
+  );
+}
+
+function ProjectAssumptions({ projectId, user }) {
   const { message } = AntApp.useApp();
   const [assumptions, setAssumptions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -60,6 +66,19 @@ export default function AssumptionsPanel({ projectId, user }) {
   const [criticality, setCriticality] = useState(null);
   const [evidence, setEvidence] = useState(null);
   const [scoreBusy, setScoreBusy] = useState(false);
+  const [selectedId, setSelectedId] = useState(null);
+  const scoreInput = useRef(null);
+  const scoringRow = useRef(null);
+
+  useEffect(() => {
+    if (scoringAssumptionId) {
+      scoringRow.current?.scrollIntoView?.({
+        block: "center",
+        behavior: "auto",
+      });
+      scoreInput.current?.focus({ preventScroll: true });
+    }
+  }, [scoringAssumptionId]);
 
   useEffect(() => {
     let active = true;
@@ -87,6 +106,8 @@ export default function AssumptionsPanel({ projectId, user }) {
   }, [message, projectId]);
 
   function startEditing(assumption) {
+    cancelScoring();
+    setSelectedId(assumption.id);
     setEditingAssumptionId(assumption.id);
     setEditingStatement(assumption.statement);
   }
@@ -97,6 +118,15 @@ export default function AssumptionsPanel({ projectId, user }) {
   }
 
   function startScoring(assumption) {
+    setSelectedId(assumption.id);
+    if (scoringAssumptionId === assumption.id) {
+      scoringRow.current?.scrollIntoView?.({
+        block: "center",
+        behavior: "auto",
+      });
+      scoreInput.current?.focus({ preventScroll: true });
+      return;
+    }
     cancelEditing();
     setScoringAssumptionId(assumption.id);
     setCriticality(assumption.criticality ?? null);
@@ -128,6 +158,17 @@ export default function AssumptionsPanel({ projectId, user }) {
     } catch (error) {
       console.error("Failed to update assumption scores:", error);
       message.error("The assumption scores could not be saved.");
+    } finally {
+      setScoreBusy(false);
+    }
+  }
+
+  async function savePortfolioScores(assumptionId, scores) {
+    setScoreBusy(true);
+    try {
+      await updateAssumptionScores(user, projectId, assumptionId, scores);
+      setAssumptions(await loadAssumptions(projectId));
+      if (scoringAssumptionId === assumptionId) cancelScoring();
     } finally {
       setScoreBusy(false);
     }
@@ -215,7 +256,21 @@ export default function AssumptionsPanel({ projectId, user }) {
                 Number.isInteger(assumption.evidence);
 
               return (
-                <div style={{ padding: "12px 0", width: "100%" }}>
+                <div
+                  ref={isScoring ? scoringRow : null}
+                  role="group"
+                  aria-label={`Saved assumption: ${assumption.statement}`}
+                  className={`saved-assumption${selectedId === assumption.id ? " saved-assumption-selected" : ""}`}
+                >
+                  <Button
+                    type="text"
+                    aria-pressed={selectedId === assumption.id}
+                    onClick={() => setSelectedId(assumption.id)}
+                  >
+                    {selectedId === assumption.id
+                      ? "Selected assumption"
+                      : "Select assumption"}
+                  </Button>
                   {isEditing ? (
                     <Space orientation="vertical" style={{ width: "100%" }}>
                       <Input.TextArea
@@ -281,6 +336,8 @@ export default function AssumptionsPanel({ projectId, user }) {
 
                         <div style={{ marginTop: 12 }}>
                           <InputNumber
+                            ref={scoreInput}
+                            aria-label="Criticality score"
                             min={0}
                             max={100}
                             onChange={setCriticality}
@@ -319,6 +376,7 @@ export default function AssumptionsPanel({ projectId, user }) {
 
                         <div style={{ marginTop: 12 }}>
                           <InputNumber
+                            aria-label="Evidence score"
                             min={0}
                             max={100}
                             onChange={setEvidence}
@@ -372,11 +430,17 @@ export default function AssumptionsPanel({ projectId, user }) {
                       </Space>
 
                       <Space>
-                        <Button onClick={() => startEditing(assumption)}>
+                        <Button
+                          disabled={scoreBusy || editBusy}
+                          onClick={() => startEditing(assumption)}
+                        >
                           Edit statement
                         </Button>
 
-                        <Button onClick={() => startScoring(assumption)}>
+                        <Button
+                          disabled={scoreBusy || editBusy}
+                          onClick={() => startScoring(assumption)}
+                        >
                           {isAssessed ? "Update scores" : "Assess"}
                         </Button>
                       </Space>
@@ -391,7 +455,15 @@ export default function AssumptionsPanel({ projectId, user }) {
         )}
       </Card>
 
-      {!loading && <PortfolioChart assumptions={assumptions} />}
+      {!loading && (
+        <PortfolioChart
+          assumptions={assumptions}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
+          onSaveScores={savePortfolioScores}
+          editingBusy={scoreBusy || editBusy}
+        />
+      )}
     </div>
   );
 }

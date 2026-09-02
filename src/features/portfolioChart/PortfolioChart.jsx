@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Card, Empty, Tag, Typography } from "antd";
+import SelectedScoreEditor from "./SelectedScoreEditor.jsx";
 
 const { Paragraph, Text } = Typography;
 
@@ -60,17 +61,24 @@ function collisionOffsets(assumptions) {
   );
 }
 
-export default function PortfolioChart({ assumptions }) {
+export default function PortfolioChart({
+  assumptions,
+  selectedId,
+  onSelect,
+  onSaveScores,
+  editingBusy = false,
+}) {
   const assessed = useMemo(() => assumptions.filter(isAssessed), [assumptions]);
   const unassessedCount = assumptions.length - assessed.length;
-  const [selectedId, setSelectedId] = useState(null);
   const offsets = useMemo(() => collisionOffsets(assessed), [assessed]);
-  const selected = assessed.find((assumption) => assumption.id === selectedId);
+  const selected = assumptions.find(
+    (assumption) => assumption.id === selectedId,
+  );
 
   function selectFromKeyboard(event, assumptionId) {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      setSelectedId(assumptionId);
+      onSelect(assumptionId);
     }
   }
 
@@ -94,7 +102,7 @@ export default function PortfolioChart({ assumptions }) {
             <svg
               aria-labelledby="portfolio-chart-title portfolio-chart-description"
               className="portfolio-chart"
-              role="img"
+              role="group"
               viewBox="0 0 720 500"
             >
               <title id="portfolio-chart-title">
@@ -246,7 +254,8 @@ export default function PortfolioChart({ assumptions }) {
                     <g
                       aria-label={`Assumption ${index + 1}: ${assumption.statement}. Criticality ${assumption.criticality}, evidence ${assumption.evidence}.`}
                       className={`portfolio-point${isSelected ? " portfolio-point-selected" : ""}`}
-                      onClick={() => setSelectedId(assumption.id)}
+                      aria-pressed={isSelected}
+                      onClick={() => onSelect(assumption.id)}
                       onKeyDown={(event) =>
                         selectFromKeyboard(event, assumption.id)
                       }
@@ -281,7 +290,7 @@ export default function PortfolioChart({ assumptions }) {
                   <button
                     aria-pressed={selectedId === assumption.id}
                     className="portfolio-key-button"
-                    onClick={() => setSelectedId(assumption.id)}
+                    onClick={() => onSelect(assumption.id)}
                     type="button"
                   >
                     <span className="portfolio-key-number">{index + 1}</span>
@@ -300,15 +309,11 @@ export default function PortfolioChart({ assumptions }) {
         </div>
       )}
 
-      {selected && (
-        <div aria-live="polite" className="portfolio-selection">
-          <Text strong>Selected assumption</Text>
-          <Paragraph>{selected.statement}</Paragraph>
-          <Text type="secondary">
-            Criticality {selected.criticality} · Evidence {selected.evidence}
-          </Text>
-        </div>
-      )}
+      <SelectedScoreEditor
+        assumption={selected}
+        onSave={onSaveScores}
+        disabled={editingBusy}
+      />
     </Card>
   );
 }

@@ -2,6 +2,12 @@
 
 The current application includes verified authentication, isolated private projects, the Three Promises, affirmative assumptions, two-axis scoring, and a synchronized portfolio chart. The chart plots only fully assessed assumptions, keeps unassessed work distinct, and shows the highest unretired risk in the upper-right using labeled diagonal attention bands over the 3×3 qualitative grid.
 
+## Chart and list selection
+
+Select a numbered chart point, chart-key entry, or the saved list's “Select assumption” button to highlight the same assumption throughout. The selected area below the chart immediately shows editable criticality and evidence fields, without an extra “Update scores” click or scrolling to the saved list. “Save scores” refreshes both views; “Revert changes” restores saved values. Unsaved drafts persist while switching selections within the current project. Selection and typing do not write to Firestore. Failed saves retain edits for retry. Unassessed assumptions selected in the saved list can be scored here too; they remain off the chart until saved. Switching projects clears selection and drafts. The existing saved-list editors remain available.
+
+Manual check: select a point and edit evidence in the selected area. Switch to another point and back to confirm the draft remains. Save and confirm the point moves. Repeat with “Revert changes” and switch projects to verify isolation. Selection alone must not move or scroll the chart.
+
 ## Development setup
 
 Prerequisites: Node.js 22+, Java (required by the Firestore emulator), and Firebase CLI authentication only when deploying. This repository uses the dedicated Firebase development project `assumptions-management` in Firestore location `nam5`. Production must use a separate Firebase project and is not configured in this slice.
