@@ -116,6 +116,94 @@ service cloud.firestore {
       }
 
 match /assumptions/{assumptionId} {
+  function scorePair(data) {
+    return { 'criticality': data.get('criticality', null), 'evidence': data.get('evidence', null) };
+  }
+  function validScoreChange(data, insightId) {
+    let parentPath = /databases/$(database)/documents/projects/$(projectId)/assumptions/$(assumptionId);
+    let before = get(parentPath).data;
+    let after = getAfter(parentPath).data;
+    return data.scoreChange is map
+      && data.scoreChange.keys().hasOnly(['from', 'to'])
+      && data.scoreChange.keys().hasAll(['from', 'to'])
+      && data.scoreChange.from == scorePair(before)
+      && data.scoreChange.to == scorePair(after)
+      && data.scoreChange.from != data.scoreChange.to
+      && after.lastScoreChangeId == insightId
+      && after.updatedBy == request.auth.uid
+      && after.updatedAt == request.time;
+  }
+  function hasScoreChangeRecord() {
+    let recordId = request.resource.data.lastScoreChangeId;
+    let recordPath = /databases/$(database)/documents/projects/$(projectId)/assumptions/$(assumptionId)/insights/$(recordId);
+    return recordId is string
+      && !exists(recordPath)
+      && existsAfter(recordPath)
+      && getAfter(recordPath).data.createdBy == request.auth.uid
+      && getAfter(recordPath).data.createdAt == request.time
+      && getAfter(recordPath).data.scoreChange.from == scorePair(resource.data)
+      && getAfter(recordPath).data.scoreChange.to == scorePair(request.resource.data);
+  }
+
+  function managementPair(data) {
+    return { 'nextStep': data.get('nextStep', ''), 'helpNeeded': data.get('helpNeeded', '') };
+  }
+  function validManagementChange(data, insightId) {
+    let parentPath = /databases/$(database)/documents/projects/$(projectId)/assumptions/$(assumptionId);
+    let before = get(parentPath).data;
+    let after = getAfter(parentPath).data;
+    return data.managementChange is map
+      && data.managementChange.keys().hasOnly(['from', 'to'])
+      && data.managementChange.keys().hasAll(['from', 'to'])
+      && data.managementChange.from == managementPair(before)
+      && data.managementChange.to == managementPair(after)
+      && data.managementChange.from != data.managementChange.to
+      && after.lastManagementChangeId == insightId
+      && after.updatedBy == request.auth.uid
+      && after.updatedAt == request.time;
+  }
+  function hasManagementChangeRecord() {
+    let recordId = request.resource.data.lastManagementChangeId;
+    let recordPath = /databases/$(database)/documents/projects/$(projectId)/assumptions/$(assumptionId)/insights/$(recordId);
+    return recordId is string
+      && !exists(recordPath)
+      && existsAfter(recordPath)
+      && getAfter(recordPath).data.createdBy == request.auth.uid
+      && getAfter(recordPath).data.createdAt == request.time
+      && getAfter(recordPath).data.managementChange.from == managementPair(resource.data)
+      && getAfter(recordPath).data.managementChange.to == managementPair(request.resource.data);
+  }
+
+  function validManagementFields(data) {
+    return (!('nextStep' in data) || (data.nextStep is string && data.nextStep.size() <= 4000))
+      && (!('helpNeeded' in data) || (data.helpNeeded is string && data.helpNeeded.size() <= 4000));
+  }
+  match /insights/{insightId} {
+    allow read: if isActiveMember(projectId);
+    allow create: if isActiveMember(projectId)
+      && exists(/databases/$(database)/documents/projects/$(projectId)/assumptions/$(assumptionId))
+      && request.resource.data.keys().hasOnly(['description', 'createdBy', 'authorEmail', 'createdAt', 'sourceUrl', 'classification', 'scoreChange', 'managementChange'])
+      && request.resource.data.keys().hasAll(['createdBy', 'authorEmail', 'createdAt'])
+      && (('description' in request.resource.data && request.resource.data.description is string
+        && request.resource.data.description.matches('[\\s\\S]*[^\\s][\\s\\S]*')
+        && request.resource.data.description.size() <= 4000)
+        || (!('description' in request.resource.data) && ('scoreChange' in request.resource.data || 'managementChange' in request.resource.data)))
+      && (!('managementChange' in request.resource.data) || validManagementChange(request.resource.data, insightId))
+      && (!('scoreChange' in request.resource.data) || validScoreChange(request.resource.data, insightId))
+      && (!('sourceUrl' in request.resource.data) && !('classification' in request.resource.data)
+        || 'description' in request.resource.data)
+      && request.resource.data.createdBy == request.auth.uid
+      && request.resource.data.authorEmail == request.auth.token.email
+      && request.resource.data.createdAt == request.time
+      && (!('sourceUrl' in request.resource.data) || (
+        request.resource.data.sourceUrl is string
+        && request.resource.data.sourceUrl.size() <= 2000
+        && request.resource.data.sourceUrl.matches('https?://[^\\s/?#]+[^\\s]*')
+      ))
+      && (!('classification' in request.resource.data) || request.resource.data.classification in ['Evidence', 'Revised judgment', 'Mitigation / project change']);
+    allow update, delete: if false;
+  }
+
   allow read: if isActiveMember(projectId);
 
   allow create: if isActiveMember(projectId)
@@ -146,7 +234,11 @@ match /assumptions/{assumptionId} {
       'createdBy',
       'createdAt',
       'updatedAt',
-      'updatedBy'
+      'updatedBy',
+      'lastScoreChangeId',
+      'nextStep',
+      'helpNeeded',
+      'lastManagementChangeId'
     ])
     && request.resource.data.keys().hasAll([
       'statement',
@@ -159,6 +251,7 @@ match /assumptions/{assumptionId} {
     && request.resource.data.statement.size() > 0
     && request.resource.data.statement.size() <= 2000
     && hasValidAssumptionScores(request.resource.data)
+    && validManagementFields(request.resource.data)
     && request.resource.data.createdBy == resource.data.createdBy
     && request.resource.data.createdAt == resource.data.createdAt
     && request.resource.data.updatedBy == request.auth.uid
@@ -168,8 +261,18 @@ match /assumptions/{assumptionId} {
       'criticality',
       'evidence',
       'updatedAt',
-      'updatedBy'
-    ]);
+      'updatedBy',
+      'lastScoreChangeId',
+      'nextStep',
+      'helpNeeded',
+      'lastManagementChangeId'
+    ])
+    && (request.resource.data.diff(resource.data).affectedKeys().hasAny(['criticality', 'evidence'])
+      ? hasScoreChangeRecord()
+      : !request.resource.data.diff(resource.data).affectedKeys().hasAny(['lastScoreChangeId']))
+    && (request.resource.data.diff(resource.data).affectedKeys().hasAny(['nextStep', 'helpNeeded'])
+      ? hasManagementChangeRecord()
+      : !request.resource.data.diff(resource.data).affectedKeys().hasAny(['lastManagementChangeId']));
 
   allow delete: if false;
 }

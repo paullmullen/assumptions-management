@@ -67,6 +67,7 @@ export default function PortfolioChart({
   onSelect,
   onSaveScores,
   editingBusy = false,
+  editorFocusRequest = 0,
 }) {
   const assessed = useMemo(() => assumptions.filter(isAssessed), [assumptions]);
   const unassessedCount = assumptions.length - assessed.length;
@@ -313,6 +314,7 @@ export default function PortfolioChart({
         assumption={selected}
         onSave={onSaveScores}
         disabled={editingBusy}
+        focusRequest={editorFocusRequest}
       />
     </Card>
   );

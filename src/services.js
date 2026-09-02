@@ -1,3 +1,4 @@
+import { normalizeInsight } from "./features/assumptions/insightValues.js";
 import {
   addDoc,
   collection,
@@ -5,6 +6,7 @@ import {
   getDoc,
   getDocs,
   serverTimestamp,
+  runTransaction,
   setDoc,
   updateDoc,
   writeBatch,
@@ -16,20 +18,51 @@ export async function updateAssumptionScores(
   projectId,
   assumptionId,
   scores,
+  insightDescription = "",
 ) {
-  const { criticality, evidence } = scores;
+  return saveAssumptionChanges(
+    user,
+    projectId,
+    assumptionId,
+    scores,
+    insightDescription.trim() ? { description: insightDescription } : null,
+  );
+}
 
+export async function saveAssumptionChanges(
+  user,
+  projectId,
+  assumptionId,
+  scores,
+  insightValues,
+  managementValues = null,
+) {
   if (
-    !Number.isInteger(criticality) ||
-    criticality < 0 ||
-    criticality > 100 ||
-    !Number.isInteger(evidence) ||
-    evidence < 0 ||
-    evidence > 100
-  ) {
+    scores &&
+    ![scores.criticality, scores.evidence].every(
+      (value) => Number.isInteger(value) && value >= 0 && value <= 100,
+    )
+  )
     throw new RangeError("Assumption scores must be integers from 0 to 100.");
-  }
-
+  const management =
+    managementValues === null
+      ? null
+      : Object.fromEntries(
+          Object.entries(managementValues).map(([key, value]) => {
+            if (
+              !["nextStep", "helpNeeded"].includes(key) ||
+              typeof value !== "string" ||
+              value.trim().length > 4000
+            )
+              throw new Error(
+                "Next step and help needed must be text of up to 4,000 characters.",
+              );
+            return [key, value.trim()];
+          }),
+        );
+  const data = insightValues ? normalizeInsight(insightValues) : null;
+  if (!scores && !data && !Object.keys(management ?? {}).length)
+    throw new Error("Enter an insight or change a score before saving.");
   const assumptionRef = doc(
     db,
     "projects",
@@ -37,12 +70,59 @@ export async function updateAssumptionScores(
     "assumptions",
     assumptionId,
   );
-
-  await updateDoc(assumptionRef, {
-    criticality,
-    evidence,
-    updatedAt: serverTimestamp(),
-    updatedBy: user.uid,
+  const reference = doc(collection(assumptionRef, "insights"));
+  return runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(assumptionRef);
+    if (!snapshot.exists()) throw new Error("This assumption is unavailable.");
+    const current = snapshot.data();
+    const from = {
+      criticality: current.criticality ?? null,
+      evidence: current.evidence ?? null,
+    };
+    const changed =
+      scores &&
+      (scores.criticality !== from.criticality ||
+        scores.evidence !== from.evidence);
+    const managementFrom = {
+      nextStep: current.nextStep ?? "",
+      helpNeeded: current.helpNeeded ?? "",
+    };
+    const managementTo = { ...managementFrom, ...management };
+    const managementChanged = Object.keys(managementFrom).some(
+      (key) => managementFrom[key] !== managementTo[key],
+    );
+    if (!changed && !managementChanged && !data) return null;
+    const record = {
+      ...(data ?? {}),
+      ...(changed && {
+        scoreChange: {
+          from,
+          to: { criticality: scores.criticality, evidence: scores.evidence },
+        },
+      }),
+      ...(managementChanged && {
+        managementChange: { from: managementFrom, to: managementTo },
+      }),
+      createdBy: user.uid,
+      authorEmail: user.email,
+      createdAt: serverTimestamp(),
+    };
+    if (changed || managementChanged)
+      transaction.update(assumptionRef, {
+        ...(changed && {
+          criticality: scores.criticality,
+          evidence: scores.evidence,
+          lastScoreChangeId: reference.id,
+        }),
+        ...(managementChanged && {
+          ...managementTo,
+          lastManagementChangeId: reference.id,
+        }),
+        updatedAt: serverTimestamp(),
+        updatedBy: user.uid,
+      });
+    transaction.set(reference, record);
+    return { ...record, id: reference.id, createdAt: null };
   });
 }
 
@@ -167,4 +247,47 @@ export async function addBasicAssumption(user, projectId, statement) {
     createdBy: user.uid,
     createdAt: serverTimestamp(),
   });
+}
+
+export async function loadInsights(projectId, assumptionId) {
+  const snapshot = await getDocs(
+    collection(
+      db,
+      "projects",
+      projectId,
+      "assumptions",
+      assumptionId,
+      "insights",
+    ),
+  );
+  return snapshot.docs
+    .map((item) => ({ id: item.id, ...item.data() }))
+    .sort(
+      (a, b) =>
+        (b.createdAt?.toMillis() ?? 0) - (a.createdAt?.toMillis() ?? 0) ||
+        a.id.localeCompare(b.id),
+    );
+}
+
+export async function addInsight(user, projectId, assumptionId, values) {
+  const data = normalizeInsight(values);
+  const record = {
+    ...data,
+    createdBy: user.uid,
+    authorEmail: user.email,
+    createdAt: serverTimestamp(),
+  };
+  const reference = await addDoc(
+    collection(
+      db,
+      "projects",
+      projectId,
+      "assumptions",
+      assumptionId,
+      "insights",
+    ),
+    record,
+  );
+  // Do not turn a successful write into a failed save if a follow-up read fails.
+  return { ...record, id: reference.id, createdAt: null };
 }

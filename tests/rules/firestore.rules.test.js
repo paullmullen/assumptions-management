@@ -1,5 +1,13 @@
 import { readFileSync } from "node:fs";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import {
   assertFails,
   assertSucceeds,
@@ -7,6 +15,8 @@ import {
 } from "@firebase/rules-unit-testing";
 import {
   collection,
+  deleteDoc,
+  serverTimestamp,
   doc,
   getDoc,
   getDocs,
@@ -15,6 +25,18 @@ import {
   updateDoc,
   writeBatch,
 } from "firebase/firestore";
+
+import {
+  updateAssumptionScores,
+  saveAssumptionChanges,
+  addInsight,
+} from "../../src/services.js";
+let serviceDb;
+vi.mock("../../src/firebase.js", () => ({
+  get db() {
+    return serviceDb;
+  },
+}));
 
 const projectId = "project-a";
 const ownerId = "owner-a";
@@ -402,13 +424,19 @@ describe("Slice 1 Firestore security rules", () => {
       }),
     );
 
+    serviceDb = testEnv
+      .authenticatedContext(ownerId, {
+        email_verified: true,
+        email: "owner@example.com",
+      })
+      .firestore();
     await assertSucceeds(
-      updateDoc(assumptionRef, {
-        criticality: 90,
-        evidence: 20,
-        updatedAt: Timestamp.now(),
-        updatedBy: ownerId,
-      }),
+      updateAssumptionScores(
+        { uid: ownerId, email: "owner@example.com" },
+        projectId,
+        "legacy-assumption",
+        { criticality: 90, evidence: 20 },
+      ),
     );
 
     const snapshot = await getDoc(assumptionRef);
@@ -532,5 +560,587 @@ describe("Slice 1 Firestore security rules", () => {
         updatedBy: otherUserId,
       }),
     );
+  });
+});
+
+describe("New Insights security", () => {
+  const path = `projects/${projectId}/assumptions/a/insights/i`;
+  const actor = () =>
+    testEnv
+      .authenticatedContext(ownerId, {
+        email_verified: true,
+        email: "owner@example.com",
+      })
+      .firestore();
+  const insight = () => ({
+    description: "Revised judgment after a customer discussion.",
+    createdBy: ownerId,
+    authorEmail: "owner@example.com",
+    createdAt: serverTimestamp(),
+  });
+  beforeEach(async () => {
+    await seedPrivateProject();
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(
+        doc(context.firestore(), `projects/${projectId}/assumptions/a`),
+        {
+          statement: "We can deliver.",
+          createdBy: ownerId,
+          createdAt: Timestamp.now(),
+          criticality: 80,
+          evidence: 20,
+        },
+      );
+    });
+  });
+  it("appends and reads insights without changing scores; attribution and date are retained", async () => {
+    const db = actor();
+    await assertSucceeds(setDoc(doc(db, path), insight()));
+    await assertSucceeds(
+      setDoc(doc(db, path + "2"), {
+        ...insight(),
+        sourceUrl: "https://example.com/report",
+        classification: "Mitigation / project change",
+      }),
+    );
+    const record = await assertSucceeds(getDoc(doc(db, path)));
+    expect(record.data().createdBy).toBe(ownerId);
+    expect(record.data().createdAt).toBeInstanceOf(Timestamp);
+    await assertSucceeds(
+      getDocs(collection(db, `projects/${projectId}/assumptions/a/insights`)),
+    );
+    const assumption = await getDoc(
+      doc(db, `projects/${projectId}/assumptions/a`),
+    );
+    expect(assumption.data()).toMatchObject({ criticality: 80, evidence: 20 });
+    await assertFails(updateDoc(doc(db, path), { description: "Overwrite" }));
+    await assertFails(deleteDoc(doc(db, path)));
+  });
+  it("rejects malformed fields, false attribution, client dates and absent parents", async () => {
+    const db = actor();
+    for (const patch of [
+      { description: "" },
+      { description: "   \n" },
+      { description: "x".repeat(4001) },
+      { createdBy: otherUserId },
+      { authorEmail: "fake@example.com" },
+      { createdAt: Timestamp.fromMillis(1) },
+      { sourceUrl: "javascript:alert(1)" },
+      { sourceUrl: "https://" },
+      { sourceUrl: "https://example.com/" + "x".repeat(2000) },
+      { classification: "required" },
+      { evidence: 100 },
+    ]) {
+      await assertFails(setDoc(doc(db, path), { ...insight(), ...patch }));
+    }
+    await assertFails(
+      setDoc(
+        doc(db, `projects/${projectId}/assumptions/missing/insights/i`),
+        insight(),
+      ),
+    );
+  });
+  it("denies anonymous, unverified, inactive and other-project members reads, queries and writes", async () => {
+    await setDoc(doc(actor(), path), insight());
+    await seedPrivateProject("project-b", otherUserId);
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(
+        doc(
+          context.firestore(),
+          `users/inactive/projectMemberships/${projectId}`,
+        ),
+        { ...membership(projectId, "inactive"), active: false },
+      );
+    });
+    const contexts = [
+      testEnv.unauthenticatedContext(),
+      testEnv.authenticatedContext(ownerId, {
+        email_verified: false,
+        email: "owner@example.com",
+      }),
+      verifiedContext(otherUserId),
+      verifiedContext("inactive"),
+    ];
+    for (const context of contexts) {
+      const db = context.firestore();
+      await assertFails(getDoc(doc(db, path)));
+      await assertFails(
+        getDocs(collection(db, `projects/${projectId}/assumptions/a/insights`)),
+      );
+      await assertFails(setDoc(doc(db, path + "new"), insight()));
+    }
+  });
+});
+
+describe("Score notes service with Firestore rules", () => {
+  const user = { uid: ownerId, email: "owner@example.com" };
+  const parent = `projects/${projectId}/assumptions/score-note`;
+  beforeEach(async () => {
+    await seedPrivateProject();
+    serviceDb = testEnv
+      .authenticatedContext(ownerId, {
+        email_verified: true,
+        email: user.email,
+      })
+      .firestore();
+    await setDoc(doc(serviceDb, parent), {
+      statement: "Customers will adopt it.",
+      createdBy: ownerId,
+      createdAt: Timestamp.now(),
+      criticality: 80,
+      evidence: 20,
+    });
+  });
+  it.each([
+    { criticality: 80, evidence: 60 },
+    { criticality: 70, evidence: 20 },
+  ])(
+    "saves a score change and attributed note together: %o",
+    async (scores) => {
+      await updateAssumptionScores(
+        user,
+        projectId,
+        "score-note",
+        scores,
+        " Updated judgment ",
+      );
+      expect((await getDoc(doc(serviceDb, parent))).data()).toMatchObject(
+        scores,
+      );
+      const records = await getDocs(collection(serviceDb, parent, "insights"));
+      expect(records.size).toBe(1);
+      expect(records.docs[0].data()).toMatchObject({
+        description: "Updated judgment",
+        createdBy: ownerId,
+        authorEmail: user.email,
+      });
+      expect(records.docs[0].data().createdAt).toBeInstanceOf(Timestamp);
+      expect(
+        records.docs[0]
+          .data()
+          .createdAt.isEqual(
+            (await getDoc(doc(serviceDb, parent))).data().updatedAt,
+          ),
+      ).toBe(true);
+    },
+  );
+  it("commits neither scores nor note when note attribution is rejected", async () => {
+    await assertFails(
+      updateAssumptionScores(
+        { ...user, email: "forged@example.com" },
+        projectId,
+        "score-note",
+        { criticality: 99, evidence: 99 },
+        "Rejected note",
+      ),
+    );
+    expect((await getDoc(doc(serviceDb, parent))).data()).toMatchObject({
+      criticality: 80,
+      evidence: 20,
+    });
+    expect(
+      (await getDocs(collection(serviceDb, parent, "insights"))).empty,
+    ).toBe(true);
+  });
+  it("the unified save adds a note without changing any assumption fields", async () => {
+    const before = (await getDoc(doc(serviceDb, parent))).data();
+    await saveAssumptionChanges(user, projectId, "score-note", null, {
+      description: "Insight only",
+      sourceUrl: "https://example.com",
+      classification: "Revised judgment",
+    });
+    expect((await getDoc(doc(serviceDb, parent))).data()).toEqual(before);
+    const entries = await getDocs(collection(serviceDb, parent, "insights"));
+    expect(entries.size).toBe(1);
+    expect(entries.docs[0].data()).toMatchObject({
+      description: "Insight only",
+      authorEmail: user.email,
+      createdBy: ownerId,
+      classification: "Revised judgment",
+    });
+    expect(entries.docs[0].data().createdAt).toBeInstanceOf(Timestamp);
+  });
+  it("the unified save supports insights on an unassessed assumption", async () => {
+    const ref = doc(serviceDb, `projects/${projectId}/assumptions/unassessed`);
+    await setDoc(ref, {
+      statement: "We can support it.",
+      createdBy: ownerId,
+      createdAt: Timestamp.now(),
+    });
+    const before = (await getDoc(ref)).data();
+    await saveAssumptionChanges(user, projectId, "unassessed", null, {
+      description: "Learning without scores",
+    });
+    expect((await getDoc(ref)).data()).toEqual(before);
+  });
+  it("the unified save rejects empty submissions and invalid notes without changing scores", async () => {
+    await expect(
+      saveAssumptionChanges(user, projectId, "score-note", null, null),
+    ).rejects.toThrow();
+    await expect(
+      saveAssumptionChanges(
+        user,
+        projectId,
+        "score-note",
+        { criticality: 99, evidence: 99 },
+        { description: " " },
+      ),
+    ).rejects.toThrow();
+    expect((await getDoc(doc(serviceDb, parent))).data()).toMatchObject({
+      criticality: 80,
+      evidence: 20,
+    });
+    expect(
+      (await getDocs(collection(serviceDb, parent, "insights"))).empty,
+    ).toBe(true);
+  });
+  it("still permits score-only and note-only service calls", async () => {
+    await updateAssumptionScores(user, projectId, "score-note", {
+      criticality: 80,
+      evidence: 60,
+    });
+    expect(
+      (await getDocs(collection(serviceDb, parent, "insights"))).size,
+    ).toBe(1);
+    const before = (await getDoc(doc(serviceDb, parent))).data();
+    await addInsight(user, projectId, "score-note", {
+      description: "Learning without changing scores",
+    });
+    expect((await getDoc(doc(serviceDb, parent))).data()).toEqual(before);
+    expect(
+      (await getDocs(collection(serviceDb, parent, "insights"))).size,
+    ).toBe(2);
+  });
+  it("records from/to for score-only changes, skips no-ops, and reads current stored scores", async () => {
+    const first = await saveAssumptionChanges(
+      user,
+      projectId,
+      "score-note",
+      { criticality: 80, evidence: 60 },
+      null,
+    );
+    expect(first.scoreChange).toEqual({
+      from: { criticality: 80, evidence: 20 },
+      to: { criticality: 80, evidence: 60 },
+    });
+    expect(first.description).toBeUndefined();
+    const second = await saveAssumptionChanges(
+      user,
+      projectId,
+      "score-note",
+      { criticality: 75, evidence: 65 },
+      { description: "Both changed" },
+    );
+    expect(second.scoreChange.from).toEqual(first.scoreChange.to);
+    expect(second.scoreChange.to).toEqual({ criticality: 75, evidence: 65 });
+    expect(
+      await saveAssumptionChanges(
+        user,
+        projectId,
+        "score-note",
+        { criticality: 75, evidence: 65 },
+        null,
+      ),
+    ).toBeNull();
+    const note = await saveAssumptionChanges(
+      user,
+      projectId,
+      "score-note",
+      { criticality: 75, evidence: 65 },
+      { description: "No movement" },
+    );
+    expect(note.scoreChange).toBeUndefined();
+    expect(
+      (await getDocs(collection(serviceDb, parent, "insights"))).size,
+    ).toBe(3);
+  });
+  it("records initial assessment with null from-values", async () => {
+    await setDoc(doc(serviceDb, `projects/${projectId}/assumptions/new`), {
+      statement: "New",
+      createdBy: ownerId,
+      createdAt: Timestamp.now(),
+    });
+    const entry = await saveAssumptionChanges(
+      user,
+      projectId,
+      "new",
+      { criticality: 80, evidence: 20 },
+      null,
+    );
+    expect(entry.scoreChange.from).toEqual({
+      criticality: null,
+      evidence: null,
+    });
+  });
+  it("rejects missing history, forged before/after values, and standalone score records", async () => {
+    await assertFails(
+      updateDoc(doc(serviceDb, parent), {
+        criticality: 75,
+        evidence: 60,
+        updatedBy: ownerId,
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    const entryRef = doc(serviceDb, parent, "insights", "forged");
+    const valid = {
+      createdBy: ownerId,
+      authorEmail: user.email,
+      createdAt: serverTimestamp(),
+      scoreChange: {
+        from: { criticality: 80, evidence: 20 },
+        to: { criticality: 75, evidence: 60 },
+      },
+    };
+    await assertFails(setDoc(entryRef, valid));
+    for (const scoreChange of [
+      {
+        from: { criticality: 1, evidence: 20 },
+        to: { criticality: 75, evidence: 60 },
+      },
+      {
+        from: { criticality: 80, evidence: 20 },
+        to: { criticality: 75, evidence: 99 },
+      },
+    ]) {
+      const batch = writeBatch(serviceDb);
+      batch.update(doc(serviceDb, parent), {
+        criticality: 75,
+        evidence: 60,
+        updatedAt: serverTimestamp(),
+        updatedBy: ownerId,
+        lastScoreChangeId: "forged",
+      });
+      batch.set(entryRef, { ...valid, scoreChange });
+      await assertFails(batch.commit());
+    }
+    expect((await getDoc(doc(serviceDb, parent))).data().criticality).toBe(80);
+  });
+  it("keeps concurrent history consistent, including retry after a rejected conflict", async () => {
+    const targets = [
+      { criticality: 70, evidence: 30 },
+      { criticality: 60, evidence: 40 },
+    ];
+    const results = await Promise.allSettled(
+      targets.map((scores) =>
+        saveAssumptionChanges(user, projectId, "score-note", scores, null),
+      ),
+    );
+    const entries = results
+      .filter((result) => result.status === "fulfilled")
+      .map((result) => result.value);
+    expect(entries.length).toBeGreaterThan(0);
+    // Rules may reject a stale transaction before the emulator reports a retryable
+    // conflict. The UI retains that draft; a user retry must read the new baseline.
+    for (let index = 0; index < results.length; index++) {
+      if (results[index].status === "rejected") {
+        expect(results[index].reason.code).toBe("permission-denied");
+        entries.push(
+          await saveAssumptionChanges(
+            user,
+            projectId,
+            "score-note",
+            targets[index],
+            null,
+          ),
+        );
+      }
+    }
+    const first = entries.find(
+      (entry) => entry.scoreChange.from.criticality === 80,
+    );
+    const second = entries.find((entry) => entry.id !== first.id);
+    expect(second.scoreChange.from).toEqual(first.scoreChange.to);
+    const final = (await getDoc(doc(serviceDb, parent))).data();
+    expect(final).toMatchObject(second.scoreChange.to);
+    expect(final.lastScoreChangeId).toBe(second.id);
+    expect(
+      (await getDocs(collection(serviceDb, parent, "insights"))).size,
+    ).toBe(2);
+  });
+  it("saves and clears management fields with immutable attributed from/to history", async () => {
+    const first = await saveAssumptionChanges(
+      user,
+      projectId,
+      "score-note",
+      null,
+      null,
+      { nextStep: " Run a pilot ", helpNeeded: "Two customers" },
+    );
+    expect(first.managementChange).toEqual({
+      from: { nextStep: "", helpNeeded: "" },
+      to: { nextStep: "Run a pilot", helpNeeded: "Two customers" },
+    });
+    expect(first.scoreChange).toBeUndefined();
+    let current = (await getDoc(doc(serviceDb, parent))).data();
+    expect(current).toMatchObject({
+      criticality: 80,
+      evidence: 20,
+      nextStep: "Run a pilot",
+      helpNeeded: "Two customers",
+      lastManagementChangeId: first.id,
+    });
+    const stored = (
+      await getDoc(doc(serviceDb, parent, "insights", first.id))
+    ).data();
+    expect(stored.createdBy).toBe(ownerId);
+    expect(stored.authorEmail).toBe(user.email);
+    expect(stored.createdAt.isEqual(current.updatedAt)).toBe(true);
+    const cleared = await saveAssumptionChanges(
+      user,
+      projectId,
+      "score-note",
+      null,
+      null,
+      { nextStep: "" },
+    );
+    expect(cleared.managementChange.from).toEqual(first.managementChange.to);
+    expect(cleared.managementChange.to).toEqual({
+      nextStep: "",
+      helpNeeded: "Two customers",
+    });
+    current = (await getDoc(doc(serviceDb, parent))).data();
+    expect(current.helpNeeded).toBe("Two customers");
+    await assertFails(
+      updateDoc(doc(serviceDb, parent, "insights", first.id), {
+        managementChange: cleared.managementChange,
+      }),
+    );
+    await assertFails(deleteDoc(doc(serviceDb, parent, "insights", first.id)));
+  });
+  it("saves scores, management fields and an insight in one record", async () => {
+    const entry = await saveAssumptionChanges(
+      user,
+      projectId,
+      "score-note",
+      { criticality: 75, evidence: 60 },
+      { description: "Pilot changed our judgment" },
+      { nextStep: "Expand pilot" },
+    );
+    expect(entry.scoreChange).toBeDefined();
+    expect(entry.managementChange).toBeDefined();
+    expect(entry.description).toBe("Pilot changed our judgment");
+    const current = (await getDoc(doc(serviceDb, parent))).data();
+    expect(current).toMatchObject({
+      criticality: 75,
+      evidence: 60,
+      nextStep: "Expand pilot",
+      lastScoreChangeId: entry.id,
+      lastManagementChangeId: entry.id,
+    });
+    expect(
+      (await getDocs(collection(serviceDb, parent, "insights"))).size,
+    ).toBe(1);
+  });
+  it("supports management-only edits on an unassessed assumption", async () => {
+    const ref = doc(
+      serviceDb,
+      `projects/${projectId}/assumptions/unscored-management`,
+    );
+    await setDoc(ref, {
+      statement: "We can deliver",
+      createdBy: ownerId,
+      createdAt: Timestamp.now(),
+    });
+    await saveAssumptionChanges(
+      user,
+      projectId,
+      "unscored-management",
+      null,
+      null,
+      { helpNeeded: "Technical review" },
+    );
+    const current = (await getDoc(ref)).data();
+    expect(current.helpNeeded).toBe("Technical review");
+    expect(current.criticality).toBeUndefined();
+    expect(current.evidence).toBeUndefined();
+  });
+  it("rejects direct management edits, forged history, invalid values and nonmember edits", async () => {
+    await assertFails(
+      updateDoc(doc(serviceDb, parent), {
+        nextStep: "Bypass",
+        updatedBy: ownerId,
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    const batch = writeBatch(serviceDb);
+    batch.update(doc(serviceDb, parent), {
+      nextStep: "New",
+      helpNeeded: "",
+      lastManagementChangeId: "fake",
+      updatedBy: ownerId,
+      updatedAt: serverTimestamp(),
+    });
+    batch.set(doc(serviceDb, parent, "insights", "fake"), {
+      createdBy: ownerId,
+      authorEmail: user.email,
+      createdAt: serverTimestamp(),
+      managementChange: {
+        from: { nextStep: "Fabricated", helpNeeded: "" },
+        to: { nextStep: "New", helpNeeded: "" },
+      },
+    });
+    await assertFails(batch.commit());
+    for (const fields of [
+      { nextStep: 123 },
+      { helpNeeded: "x".repeat(4001) },
+      { unknown: "bad" },
+    ]) {
+      await expect(
+        saveAssumptionChanges(
+          user,
+          projectId,
+          "score-note",
+          null,
+          null,
+          fields,
+        ),
+      ).rejects.toThrow();
+    }
+    await assertFails(
+      updateDoc(doc(verifiedContext(otherUserId).firestore(), parent), {
+        nextStep: "Not authorized",
+        updatedBy: otherUserId,
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    expect(
+      (await getDocs(collection(serviceDb, parent, "insights"))).empty,
+    ).toBe(true);
+  });
+  it("rejects invalid management data through rules and rolls back the whole save", async () => {
+    const batch = writeBatch(serviceDb);
+    batch.update(doc(serviceDb, parent), {
+      nextStep: "x".repeat(4001),
+      helpNeeded: "",
+      lastManagementChangeId: "long",
+      updatedAt: serverTimestamp(),
+      updatedBy: ownerId,
+    });
+    batch.set(doc(serviceDb, parent, "insights", "long"), {
+      createdAt: serverTimestamp(),
+      createdBy: ownerId,
+      authorEmail: user.email,
+      managementChange: {
+        from: { nextStep: "", helpNeeded: "" },
+        to: { nextStep: "x".repeat(4001), helpNeeded: "" },
+      },
+    });
+    await assertFails(batch.commit());
+    await assertFails(
+      saveAssumptionChanges(
+        { ...user, email: "forged@example.com" },
+        projectId,
+        "score-note",
+        { criticality: 70, evidence: 60 },
+        { description: "Fail together" },
+        { nextStep: "Do this" },
+      ),
+    );
+    const current = (await getDoc(doc(serviceDb, parent))).data();
+    expect(current).toMatchObject({ criticality: 80, evidence: 20 });
+    expect(current.nextStep).toBeUndefined();
+    expect(
+      (await getDocs(collection(serviceDb, parent, "insights"))).empty,
+    ).toBe(true);
   });
 });

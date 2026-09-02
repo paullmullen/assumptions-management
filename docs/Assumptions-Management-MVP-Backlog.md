@@ -1,3 +1,11 @@
+# Current implementation refinement — Management record
+
+Next step and Help needed are now optional current fields in the single assumption editor. Changes save independently or with scores/insights and retain immutable previous/new values, author, and timestamp. Responsible person and target date remain deferred. See [Next step and help needed](Next-Step-and-Help-Needed.md). Formal reviews are the next planned core slice; other unimplemented backlog items remain outstanding.
+
+# Current implementation refinement — New Insights
+
+The delivered New Insights slice supersedes the evidence-only scope below: each append-only insight belongs to one assumption, with description, author, server date, optional source URL, and optional classification. It can represent evidence, revised judgment, or a mitigation/project change. Multi-assumption links and rejection/supersession are deferred. Insights never automatically change scores or gate scoring. One consolidated editor and Save changes action accepts an insight alone, a score change alone, or both atomically. The former separate insight form and list score form have been removed; list actions focus the same editor. Actual score changes now append immutable from/to values with optional insight, author, and timestamp in one transaction. Rules enforce matching history for score updates. Older score values are not backfilled. See [New Insights](New-Insights.md) for implemented behavior and acceptance checks. Remaining historical backlog items are not claims of implementation.
+
 # Assumptions Management Webapp
 
 ## MVP Product Baseline and Implementation Backlog

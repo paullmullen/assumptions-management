@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   App as AntApp,
   Button,
@@ -6,7 +6,6 @@ import {
   Empty,
   Form,
   Input,
-  InputNumber,
   Listy,
   Space,
   Spin,
@@ -17,9 +16,11 @@ import {
   addBasicAssumption,
   loadAssumptions,
   updateAssumption,
-  updateAssumptionScores,
+  saveAssumptionChanges,
 } from "../../services.js";
 import PortfolioChart from "../portfolioChart/PortfolioChart.jsx";
+
+import InsightsPanel from "./InsightsPanel.jsx";
 
 const { Paragraph, Text } = Typography;
 
@@ -62,23 +63,10 @@ function ProjectAssumptions({ projectId, user }) {
   const [editingAssumptionId, setEditingAssumptionId] = useState(null);
   const [editingStatement, setEditingStatement] = useState("");
   const [editBusy, setEditBusy] = useState(false);
-  const [scoringAssumptionId, setScoringAssumptionId] = useState(null);
-  const [criticality, setCriticality] = useState(null);
-  const [evidence, setEvidence] = useState(null);
+  const [newInsights, setNewInsights] = useState({});
   const [scoreBusy, setScoreBusy] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
-  const scoreInput = useRef(null);
-  const scoringRow = useRef(null);
-
-  useEffect(() => {
-    if (scoringAssumptionId) {
-      scoringRow.current?.scrollIntoView?.({
-        block: "center",
-        behavior: "auto",
-      });
-      scoreInput.current?.focus({ preventScroll: true });
-    }
-  }, [scoringAssumptionId]);
+  const [editorFocusRequest, setEditorFocusRequest] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -106,7 +94,6 @@ function ProjectAssumptions({ projectId, user }) {
   }, [message, projectId]);
 
   function startEditing(assumption) {
-    cancelScoring();
     setSelectedId(assumption.id);
     setEditingAssumptionId(assumption.id);
     setEditingStatement(assumption.statement);
@@ -118,57 +105,41 @@ function ProjectAssumptions({ projectId, user }) {
   }
 
   function startScoring(assumption) {
-    setSelectedId(assumption.id);
-    if (scoringAssumptionId === assumption.id) {
-      scoringRow.current?.scrollIntoView?.({
-        block: "center",
-        behavior: "auto",
-      });
-      scoreInput.current?.focus({ preventScroll: true });
-      return;
-    }
     cancelEditing();
-    setScoringAssumptionId(assumption.id);
-    setCriticality(assumption.criticality ?? null);
-    setEvidence(assumption.evidence ?? null);
+    setSelectedId(assumption.id);
+    setEditorFocusRequest((current) => current + 1);
   }
 
-  function cancelScoring() {
-    setScoringAssumptionId(null);
-    setCriticality(null);
-    setEvidence(null);
-  }
-
-  async function saveScores(assumptionId) {
-    if (!Number.isInteger(criticality) || !Number.isInteger(evidence)) {
-      message.warning("Enter both scores as whole numbers from 0 to 100.");
-      return;
-    }
-
-    setScoreBusy(true);
-
-    try {
-      await updateAssumptionScores(user, projectId, assumptionId, {
-        criticality,
-        evidence,
-      });
-      setAssumptions(await loadAssumptions(projectId));
-      cancelScoring();
-      message.success("Assumption scores saved.");
-    } catch (error) {
-      console.error("Failed to update assumption scores:", error);
-      message.error("The assumption scores could not be saved.");
-    } finally {
-      setScoreBusy(false);
-    }
-  }
-
-  async function savePortfolioScores(assumptionId, scores) {
+  async function savePortfolioScores(
+    assumptionId,
+    scores,
+    insightValues,
+    managementValues,
+  ) {
     setScoreBusy(true);
     try {
-      await updateAssumptionScores(user, projectId, assumptionId, scores);
-      setAssumptions(await loadAssumptions(projectId));
-      if (scoringAssumptionId === assumptionId) cancelScoring();
+      const insight = await saveAssumptionChanges(
+        user,
+        projectId,
+        assumptionId,
+        scores,
+        insightValues,
+        ...(managementValues ? [managementValues] : []),
+      );
+      // A successful commit is final even if refreshing the history later fails.
+      if (scores || insight?.managementChange)
+        setAssumptions((current) =>
+          current.map((item) =>
+            item.id === assumptionId
+              ? { ...item, ...scores, ...insight?.managementChange?.to }
+              : item,
+          ),
+        );
+      if (insight)
+        setNewInsights((current) => ({
+          ...current,
+          [assumptionId]: [insight, ...(current[assumptionId] ?? [])],
+        }));
     } finally {
       setScoreBusy(false);
     }
@@ -250,14 +221,12 @@ function ProjectAssumptions({ projectId, user }) {
           <Listy
             itemRender={(assumption) => {
               const isEditing = editingAssumptionId === assumption.id;
-              const isScoring = scoringAssumptionId === assumption.id;
               const isAssessed =
                 Number.isInteger(assumption.criticality) &&
                 Number.isInteger(assumption.evidence);
 
               return (
                 <div
-                  ref={isScoring ? scoringRow : null}
                   role="group"
                   aria-label={`Saved assumption: ${assumption.statement}`}
                   className={`saved-assumption${selectedId === assumption.id ? " saved-assumption-selected" : ""}`}
@@ -297,106 +266,6 @@ function ProjectAssumptions({ projectId, user }) {
                         </Button>
 
                         <Button disabled={editBusy} onClick={cancelEditing}>
-                          Cancel
-                        </Button>
-                      </Space>
-                    </Space>
-                  ) : isScoring ? (
-                    <Space
-                      orientation="vertical"
-                      size="middle"
-                      style={{ width: "100%" }}
-                    >
-                      <Paragraph style={{ margin: 0 }}>
-                        {assumption.statement}
-                      </Paragraph>
-                      <div>
-                        <Text strong>What if we are wrong?</Text>
-
-                        <div style={{ marginTop: 8 }}>
-                          <Text>
-                            <strong>66–100 — Game over:</strong> We cannot
-                            deliver our promises.
-                          </Text>
-                          <br />
-
-                          <Text>
-                            <strong>33–65 — Strategic change required:</strong>{" "}
-                            We can still deliver our promises, but we must do it
-                            differently.
-                          </Text>
-                          <br />
-
-                          <Text>
-                            <strong>0–32 — Manageable consequence:</strong> We
-                            can live with the consequence without taking
-                            additional action.
-                          </Text>
-                        </div>
-
-                        <div style={{ marginTop: 12 }}>
-                          <InputNumber
-                            ref={scoreInput}
-                            aria-label="Criticality score"
-                            min={0}
-                            max={100}
-                            onChange={setCriticality}
-                            placeholder="0–100"
-                            precision={0}
-                            value={criticality}
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <Text strong>How strong is our evidence?</Text>
-
-                        <div style={{ marginTop: 8 }}>
-                          <Text>
-                            <strong>0–32 — Educated hypothesis:</strong> The
-                            assumption is a reasonable, informed judgment, but
-                            little direct evidence supports it.
-                          </Text>
-                          <br />
-
-                          <Text>
-                            <strong>33–65 — Indicative evidence:</strong> Some
-                            relevant evidence exists, but it is not yet
-                            compelling—for example, small data sets, limited
-                            testing, or reliance on results produced by others.
-                          </Text>
-                          <br />
-
-                          <Text>
-                            <strong>66–100 — Strong evidence:</strong> Direct,
-                            repeatable evidence consistently supports the
-                            assumption.
-                          </Text>
-                        </div>
-
-                        <div style={{ marginTop: 12 }}>
-                          <InputNumber
-                            aria-label="Evidence score"
-                            min={0}
-                            max={100}
-                            onChange={setEvidence}
-                            placeholder="0–100"
-                            precision={0}
-                            value={evidence}
-                          />
-                        </div>
-                      </div>
-
-                      <Space>
-                        <Button
-                          loading={scoreBusy}
-                          onClick={() => saveScores(assumption.id)}
-                          type="primary"
-                        >
-                          Save scores
-                        </Button>
-
-                        <Button disabled={scoreBusy} onClick={cancelScoring}>
                           Cancel
                         </Button>
                       </Space>
@@ -462,6 +331,15 @@ function ProjectAssumptions({ projectId, user }) {
           onSelect={setSelectedId}
           onSaveScores={savePortfolioScores}
           editingBusy={scoreBusy || editBusy}
+          editorFocusRequest={editorFocusRequest}
+        />
+      )}
+      {assumptions.some((item) => item.id === selectedId) && (
+        <InsightsPanel
+          key={selectedId}
+          newInsights={newInsights[selectedId]}
+          projectId={projectId}
+          assumption={assumptions.find((item) => item.id === selectedId)}
         />
       )}
     </div>
