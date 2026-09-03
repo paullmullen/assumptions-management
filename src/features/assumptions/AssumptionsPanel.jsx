@@ -34,6 +34,7 @@ function ProjectAssumptions({
   desktop = false,
   onDrawerChange,
   onAdopted,
+  onAdoptionStarted,
   onCandidateCount,
 }) {
   const guard = useNavigationGuard();
@@ -83,7 +84,9 @@ function ProjectAssumptions({
   const [selectedId, setSelectedId] = useState(null);
   const [editor, setEditor] = useState(null);
   const trigger = useRef(null);
-  const visible = Boolean(editor && view === "portfolio");
+  const visible = Boolean(
+    editor && view === (editor.candidate ? "candidates" : "portfolio"),
+  );
   useEffect(() => {
     onDrawerChange?.(visible);
     return () => onDrawerChange?.(false);
@@ -255,10 +258,11 @@ function ProjectAssumptions({
           user={user}
           expanded={view === "candidates"}
           onCountChange={onCandidateCount}
-          onAdopt={(active) => {
-            saved(active, true);
-            setEditor({ id: active.id });
-            onAdopted?.();
+          adoptingId={visible ? editor?.candidate?.id : null}
+          onAdopt={(candidate, complete) => {
+            trigger.current = document.activeElement;
+            setEditor({ id: candidate.id, candidate, complete });
+            onAdoptionStarted?.();
           }}
         />
       </section>
@@ -325,7 +329,8 @@ function ProjectAssumptions({
       </section>
       {visible && (
         <AssumptionDrawer
-          key={editor.id}
+          key={`${editor.id}:${editor.candidate ? "adoption" : "active"}`}
+          candidate={editor.candidate}
           projectId={projectId}
           user={user}
           assumption={selected}
@@ -336,7 +341,14 @@ function ProjectAssumptions({
               : null
           }
           desktop={desktop}
-          onSaved={saved}
+          onSaved={(active, didSave) => {
+            saved(active, didSave);
+            if (editor.candidate && didSave) {
+              editor.complete();
+              setEditor({ id: active.id });
+              onAdopted?.();
+            }
+          }}
           onClose={close}
         />
       )}

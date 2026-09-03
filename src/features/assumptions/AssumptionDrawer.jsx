@@ -17,7 +17,7 @@ import {
   prepareAssumptionDraft,
 } from "./assumptionDraft.js";
 import { insightClassifications } from "./insightValues.js";
-import { saveAssumptionDraft } from "../../services.js";
+import { adoptCandidate, saveAssumptionDraft } from "../../services.js";
 import CriticalityReminder from "./CriticalityReminder.jsx";
 import InsightsPanel from "./InsightsPanel.jsx";
 
@@ -31,6 +31,7 @@ export default function AssumptionDrawer({
   user,
   assumption,
   assumptionId,
+  candidate,
   number,
   desktop,
   onSaved,
@@ -41,7 +42,12 @@ export default function AssumptionDrawer({
   const heading = useRef(null);
   const errorArea = useRef(null);
   const [baseline, setBaseline] = useState(assumption ?? null);
-  const [draft, setDraft] = useState(() => editableAssumption(assumption));
+  const [adopting, setAdopting] = useState(candidate ?? null);
+  const [requestId] = useState(() => crypto.randomUUID());
+  const [draft, setDraft] = useState(() =>
+    editableAssumption(candidate ?? assumption),
+  );
+  const [candidateConflict, setCandidateConflict] = useState(null);
   const [insight, setInsight] = useState(emptyInsight);
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
@@ -50,19 +56,32 @@ export default function AssumptionDrawer({
   const [conflict, setConflict] = useState(null);
   const [reverting, setReverting] = useState(false);
   const [newInsights, setNewInsights] = useState([]);
-  const original = editableAssumption(baseline ?? {});
+  const original = editableAssumption(adopting ?? baseline ?? {});
   const dirty =
     Object.keys(assumptionFields).some((key) => draft[key] !== original[key]) ||
     Object.values(insight).some(Boolean);
+  function validate() {
+    if (
+      adopting &&
+      ![draft.criticality, draft.evidence].every(
+        (value) => Number.isInteger(value) && value >= 0 && value <= 100,
+      )
+    )
+      throw new Error(
+        "Enter both initial scores as whole numbers from 0–100 before adopting.",
+      );
+    return prepareAssumptionDraft(baseline, draft, insight);
+  }
   let prepared;
   try {
-    prepared = prepareAssumptionDraft(baseline, draft, insight);
+    prepared = validate();
   } catch {
     /* Validation is shown when saving. */
   }
   const canSave =
     !busy &&
     !conflict &&
+    !candidateConflict &&
     Boolean(prepared) &&
     (baseline === null ||
       Object.keys(prepared.changes).length > 0 ||
@@ -71,8 +90,9 @@ export default function AssumptionDrawer({
     heading.current?.focus({ preventScroll: true });
   }, []);
   useEffect(() => {
-    if (error || conflict) errorArea.current?.focus({ preventScroll: false });
-  }, [error, conflict]);
+    if (error || conflict || candidateConflict)
+      errorArea.current?.focus({ preventScroll: false });
+  }, [error, conflict, candidateConflict]);
   function change(key, value) {
     setDraft((current) => ({ ...current, [key]: value }));
     setSaved(false);
@@ -84,17 +104,18 @@ export default function AssumptionDrawer({
     setError("");
   }
   function discard() {
-    setDraft(editableAssumption(baseline ?? {}));
+    setDraft(editableAssumption(adopting ?? baseline ?? {}));
     setInsight(emptyInsight);
     setConflict(null);
+    setCandidateConflict(null);
     setError("");
     setSaved(false);
   }
   async function save(event) {
     event?.preventDefault();
-    if (inFlight.current || conflict) return false;
+    if (inFlight.current || conflict || candidateConflict) return false;
     try {
-      prepareAssumptionDraft(baseline, draft, insight);
+      validate();
     } catch (cause) {
       setError(cause.message);
       return false;
@@ -104,14 +125,28 @@ export default function AssumptionDrawer({
     setSaved(false);
     setError("");
     try {
-      const result = await saveAssumptionDraft(
-        user,
-        projectId,
-        assumptionId,
-        baseline,
-        draft,
-        insight,
-      );
+      const result = adopting
+        ? {
+            assumption: await adoptCandidate(
+              user,
+              projectId,
+              adopting.id,
+              adopting.statement,
+              draft,
+              insight,
+              requestId,
+            ),
+            insight: null,
+          }
+        : await saveAssumptionDraft(
+            user,
+            projectId,
+            assumptionId,
+            baseline,
+            draft,
+            insight,
+          );
+      setAdopting(null);
       setBaseline(result.assumption);
       setDraft(editableAssumption(result.assumption));
       setInsight(emptyInsight);
@@ -121,7 +156,9 @@ export default function AssumptionDrawer({
       setSaved(true);
       return true;
     } catch (cause) {
-      if (cause.code === "assumption-conflict") setConflict(cause);
+      if (cause.code === "candidate-conflict") setCandidateConflict(cause);
+      else if (cause.code === "candidate-adopted") setError(cause.message);
+      else if (cause.code === "assumption-conflict") setConflict(cause);
       else
         setError(
           cause.code === "permission-denied"
@@ -134,12 +171,19 @@ export default function AssumptionDrawer({
       setBusy(false);
     }
   }
-  useDraft(baseline ? "Assumption changes" : "New assumption", {
-    dirty,
-    busy,
-    save: () => save(),
-    discard,
-  });
+  useDraft(
+    adopting
+      ? "Candidate adoption"
+      : baseline
+        ? "Assumption changes"
+        : "New assumption",
+    {
+      dirty,
+      busy,
+      save: () => save(),
+      discard,
+    },
+  );
   const close = () => {
     if (!busy && !reverting) guard(onClose);
   };
@@ -178,7 +222,11 @@ export default function AssumptionDrawer({
         onClose={close}
         title={
           <span id={`${fieldId}-heading`} ref={heading} tabIndex={-1}>
-            {baseline ? `Assumption ${number ?? ""}` : "New assumption"}
+            {adopting
+              ? "Score and adopt candidate"
+              : baseline
+                ? `Assumption ${number ?? ""}`
+                : "New assumption"}
           </span>
         }
         extra={
@@ -191,12 +239,12 @@ export default function AssumptionDrawer({
           <Space wrap>
             <Button
               type="primary"
-              aria-label="Save changes"
+              aria-label={adopting ? "Adopt with scores" : "Save changes"}
               onClick={() => save()}
               disabled={!canSave}
               loading={busy}
             >
-              Save changes
+              {adopting ? "Adopt with scores" : "Save changes"}
             </Button>
             <Button
               disabled={!dirty || busy}
@@ -211,9 +259,45 @@ export default function AssumptionDrawer({
         }
       >
         <form id={fieldId} onSubmit={save} className="assumption-form">
-          {(error || conflict) && (
+          {adopting && (
+            <Alert
+              type="info"
+              title="Enter both initial scores to adopt this candidate. Nothing is added to the portfolio until you save. To change wording, close this drawer and edit the candidate first."
+            />
+          )}
+          {(error || conflict || candidateConflict) && (
             <div ref={errorArea} tabIndex={-1}>
               {error && <Alert role="alert" type="error" title={error} />}
+              {candidateConflict && (
+                <Alert
+                  role="alert"
+                  type="warning"
+                  title="The candidate wording changed"
+                  description={
+                    <>
+                      <p>
+                        Your scores and notes are retained. Latest wording:{" "}
+                        {candidateConflict.current.statement}
+                      </p>
+                      <Button
+                        onClick={() => {
+                          setAdopting(candidateConflict.current);
+                          setDraft((current) => ({
+                            ...current,
+                            statement: candidateConflict.current.statement,
+                          }));
+                          setCandidateConflict(null);
+                        }}
+                      >
+                        Use latest candidate wording
+                      </Button>
+                      <p>
+                        Review your scores against this wording before adopting.
+                      </p>
+                    </>
+                  }
+                />
+              )}
               {conflict && (
                 <Alert
                   type="warning"
@@ -263,6 +347,7 @@ export default function AssumptionDrawer({
             <label htmlFor={`${fieldId}-statement`}>Assumption</label>
             <Input.TextArea
               id={`${fieldId}-statement`}
+              readOnly={Boolean(adopting)}
               value={draft.statement}
               maxLength={2000}
               autoSize={{ minRows: 3, maxRows: 8 }}

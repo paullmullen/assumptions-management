@@ -12,7 +12,7 @@ const steps = [
   },
   {
     title: "Identify what must be true",
-    text: "For each promise, ask what is true—or must become true—to deliver it. Start with about 12 important assumptions; this is guidance, not a limit. Use Candidate workshop to collect and refine ideas, then adopt them into the portfolio. You can also add an active assumption directly, before scoring it.",
+    text: "For each promise, ask what is true—or must become true—to deliver it. Start with about 12 important assumptions; this is guidance, not a limit. Use Candidate workshop to collect and refine ideas, then enter both initial scores to adopt them into the portfolio. You can also add an active assumption directly, before scoring it.",
     example:
       "An assumption: “Customers will pay enough to cover delivery costs.” A question (“Will customers pay?”), task (“Interview customers”), risk (“Low demand”), or goal (“Grow revenue”) needs a statement of what must be true.",
     target: "project-candidates",

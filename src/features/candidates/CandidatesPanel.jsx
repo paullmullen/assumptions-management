@@ -12,7 +12,6 @@ import {
 } from "antd";
 import {
   addCandidates,
-  adoptCandidate,
   editCandidate,
   loadCandidates,
 } from "../../services.js";
@@ -25,6 +24,7 @@ export default function CandidatesPanel({
   onAdopt,
   expanded,
   onCountChange,
+  adoptingId,
 }) {
   const [internalOpen, setOpen] = useState(false);
   const [internalVisited, setVisited] = useState(false);
@@ -50,7 +50,7 @@ export default function CandidatesPanel({
     >
       <Typography.Paragraph style={{ marginBottom: 0 }}>
         Collect ideas here before adding them to the active portfolio. Adopt
-        candidates when you are ready to assess them.
+        candidates by entering both initial scores before saving.
       </Typography.Paragraph>
       <div hidden={!open}>
         {visited && (
@@ -60,6 +60,7 @@ export default function CandidatesPanel({
             user={user}
             onAdopt={onAdopt}
             onCountChange={onCountChange}
+            adoptingId={adoptingId}
           />
         )}
       </div>
@@ -67,7 +68,13 @@ export default function CandidatesPanel({
   );
 }
 
-function CandidateWorkshop({ projectId, user, onAdopt, onCountChange }) {
+function CandidateWorkshop({
+  projectId,
+  user,
+  onAdopt,
+  onCountChange,
+  adoptingId,
+}) {
   const guard = useNavigationGuard();
   const { message } = AntApp.useApp();
   const [items, setItems] = useState([]);
@@ -275,16 +282,12 @@ function CandidateWorkshop({ projectId, user, onAdopt, onCountChange }) {
                           Edit candidate
                         </Button>
                         <Button
-                          disabled={busy || editing !== null}
+                          disabled={
+                            busy || editing !== null || adoptingId === item.id
+                          }
                           onClick={() =>
                             guard(() =>
-                              perform(async () => {
-                                const active = await adoptCandidate(
-                                  user,
-                                  projectId,
-                                  item.id,
-                                  item.statement,
-                                );
+                              onAdopt(item, () => {
                                 setItems((current) =>
                                   current.map((row) =>
                                     row.id === item.id
@@ -292,10 +295,7 @@ function CandidateWorkshop({ projectId, user, onAdopt, onCountChange }) {
                                       : row,
                                   ),
                                 );
-                                onAdopt(active);
-                                message.success(
-                                  "Adopted into the active portfolio.",
-                                );
+                                message.success("Adopted with initial scores.");
                               }),
                             )
                           }

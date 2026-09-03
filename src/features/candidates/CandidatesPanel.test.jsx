@@ -81,7 +81,7 @@ it("retains failed input and can refresh after a load failure", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Refresh candidates" }));
   await screen.findByRole("button", { name: "Adopt into portfolio" });
 });
-it("edits wording, then adopts the reviewed statement and exposes its preserved origin", async () => {
+it("edits wording, then opens adoption for the reviewed statement without writing", async () => {
   await open();
   editCandidate.mockResolvedValue("Customers will pay enough.");
   fireEvent.click(screen.getByRole("button", { name: "Edit candidate" }));
@@ -90,25 +90,19 @@ it("edits wording, then adopts the reviewed statement and exposes its preserved 
   });
   fireEvent.click(screen.getByRole("button", { name: "Save wording" }));
   await screen.findByText("Customers will pay enough.");
-  const active = {
-    id: "c1",
-    statement: "Customers will pay enough.",
-    sourceCandidateId: "c1",
-  };
-  adoptCandidate.mockResolvedValue(active);
   fireEvent.click(screen.getByRole("button", { name: "Adopt into portfolio" }));
-  await waitFor(() => expect(onAdopt).toHaveBeenCalledWith(active));
-  expect(adoptCandidate).toHaveBeenCalledWith(
-    user,
-    "p",
-    "c1",
-    "Customers will pay enough.",
+  expect(onAdopt).toHaveBeenCalledWith(
+    expect.objectContaining({
+      id: "c1",
+      statement: "Customers will pay enough.",
+      status: "pending",
+    }),
+    expect.any(Function),
   );
-  fireEvent.click(screen.getByRole("button", { name: "Show adopted" }));
-  await screen.findByText("Adopted");
+  expect(adoptCandidate).not.toHaveBeenCalled();
   expect(
-    screen.queryByRole("button", { name: "Edit candidate" }),
-  ).not.toBeInTheDocument();
+    screen.getByRole("button", { name: "Adopt into portfolio" }),
+  ).toBeEnabled();
 });
 it("validates bulk input and gives nonblocking wording hints", () => {
   expect(parseCandidates(" A\r\n\nB ")).toEqual(["A", "B"]);

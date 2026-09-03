@@ -2,13 +2,13 @@
 
 The approved [Next sprint plan](Next-Sprint-Plan.md) and [workspace design](Workspace-Design.md) govern the next implementation sequence. Slice 1A makes Portfolio the main view, with a single chart/list selection, separate Candidates/Reviews and Settings & access, compact promises, and shared draft protection. See [Slice 1A delivery](Workspace-Slice-1A.md).
 
-**1B — Assumption drawer** is now implemented, including atomic saves and conflict review; see [Slice 1B](Workspace-Slice-1B.md). Next: **1C — Portfolio sorting**, after agreeing on attention priority. Candidate capture/adoption is accepted as sufficient for MVP. Earlier consolidation recommendations below are superseded; merge/split and broader lifecycle work are deferred. A lower-priority discovery item compares Miro-like candidate organization with Miro API/SDK integration; do not investigate it first.
+**1B — Assumption drawer** is now implemented, including atomic saves and conflict review; see [Slice 1B](Workspace-Slice-1B.md). **1C — Portfolio sorting** and **2A — Optional reviews** are accepted. **2B — Scored candidate adoption** is implemented; see [Slice 2B](Workspace-Slice-2B.md). Next: **2C — Guided experience**. Candidate capture/adoption is accepted as sufficient for MVP. Earlier consolidation recommendations below are superseded; merge/split and broader lifecycle work are deferred. A lower-priority discovery item compares Miro-like candidate organization with Miro API/SDK integration; do not investigate it first.
 
 The following entries preserve implementation history and the original backlog; they do not override the approved sequence or scope.
 
 # Current implementation refinement — Candidate capture and adoption
 
-Members can now capture candidate assumptions individually or through multiline paste, edit pending wording, and explicitly adopt into the active portfolio. Adoption is atomic, unscored, retry-safe, and preserves the original candidate and author plus adoption metadata. Candidates stay out of review captures until adopted. Soft wording and portfolio-size guidance are included. See [Candidate capture and adoption](Candidate-Capture-and-Adoption.md). Merge/split, discard/entered-in-error, and detailed candidate edit history remain outstanding; this does not complete the entire candidate lifecycle.
+Members can now capture candidate assumptions individually or through multiline paste, edit pending wording, and explicitly adopt into the active portfolio. Adoption is atomic, requires both initial scores, is retry-safe, and preserves the original candidate and author plus adoption metadata. Candidates stay out of review captures until adopted. Soft wording and portfolio-size guidance are included. See [Candidate capture and adoption](Candidate-Capture-and-Adoption.md). Merge/split, discard/entered-in-error, and detailed candidate edit history remain outstanding; this does not complete the entire candidate lifecycle.
 
 # Current implementation refinement — Optional guided start
 

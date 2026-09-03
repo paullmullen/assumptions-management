@@ -1,7 +1,7 @@
 # Assumptions Management — next sprint plan
 
 Date: September 3, 2026  
-Status: Adopted plan of record on September 3, 2026. Slices 1A, 1B, 1C, and 2A are implemented. The user accepted the portfolio workspace through 1C; remaining cross-device/pilot acceptance stays open. See [Slice 2A](Workspace-Slice-2A.md) for the review preference. See [Slice 1C](Workspace-Slice-1C.md) for sorting and the agreed attention rule. See [Slice 1B](Workspace-Slice-1B.md) for verification and required rule deployment. See [Workspace design](Workspace-Design.md) and [Slice 1A](Workspace-Slice-1A.md).
+Status: Adopted plan of record on September 3, 2026. Slices 1A, 1B, 1C, 2A, and 2B are implemented. The user accepted 2A; [2B](Workspace-Slice-2B.md) awaits user acceptance. The user accepted the portfolio workspace through 1C; remaining cross-device/pilot acceptance stays open. See [Slice 2A](Workspace-Slice-2A.md) for the review preference. See [Slice 1C](Workspace-Slice-1C.md) for sorting and the agreed attention rule. See [Slice 1B](Workspace-Slice-1B.md) for verification and required rule deployment. See [Workspace design](Workspace-Design.md) and [Slice 1A](Workspace-Slice-1A.md).
 
 ## Objective
 

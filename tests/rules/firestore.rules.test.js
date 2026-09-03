@@ -34,10 +34,21 @@ import {
   addInsight,
   addCandidates,
   editCandidate,
-  adoptCandidate,
+  adoptCandidate as adoptCandidateWithScores,
   loadCandidates,
   loadAssumptions,
 } from "../../src/services.js";
+// Legacy workflow cases now exercise adoption with deliberate initial scores.
+const adoptCandidate = (user, project, id, statement) =>
+  adoptCandidateWithScores(
+    user,
+    project,
+    id,
+    statement,
+    { criticality: 0, evidence: 0 },
+    null,
+    "test-adoption",
+  );
 let serviceDb;
 vi.mock("../../src/firebase.js", () => ({
   get db() {
@@ -1780,7 +1791,7 @@ describe("Candidate capture and adoption", () => {
   const activeRef = (id) =>
     doc(serviceDb, "projects", projectId, "assumptions", id);
 
-  it("bulk saves candidates separately, edits, adopts unscored, and preserves immutable origin", async () => {
+  it("bulk saves candidates separately, edits, adopts with initial scores, and preserves immutable origin", async () => {
     const added = await addCandidates(
       actor,
       projectId,
@@ -1801,7 +1812,7 @@ describe("Candidate capture and adoption", () => {
       "Customers will pay enough.",
     );
     expect(active.sourceCandidateId).toBe(added[0].id);
-    expect(active.criticality).toBeUndefined();
+    expect(active.criticality).toBe(0);
     await adoptCandidate(
       actor,
       projectId,
@@ -2018,7 +2029,7 @@ describe("Candidate capture and adoption", () => {
     expect(
       after.snapshot.assumptions.find((item) => item.id === candidate.id)
         .criticality,
-    ).toBeNull();
+    ).toBe(0);
     expect(before.snapshot.assumptions).toHaveLength(1);
   });
 
@@ -2459,4 +2470,198 @@ it("keeps reviews off through the live subscription and reopening the project", 
     stop();
     reopenedStop();
   }
+});
+
+describe("scored candidate adoption", () => {
+  const actor = { uid: ownerId, email: "owner@example.com" };
+  beforeEach(async () => {
+    await seedPrivateProject();
+    serviceDb = testEnv
+      .authenticatedContext(ownerId, {
+        email_verified: true,
+        email: actor.email,
+      })
+      .firestore();
+  });
+  const refs = (id) => ({
+    candidate: doc(serviceDb, "projects", projectId, "candidates", id),
+    active: doc(serviceDb, "projects", projectId, "assumptions", id),
+    history: collection(
+      serviceDb,
+      "projects",
+      projectId,
+      "assumptions",
+      id,
+      "insights",
+    ),
+  });
+  it("requires two deliberate scores and saves initial history, management, and insight atomically", async () => {
+    const [candidate] = await addCandidates(
+      actor,
+      projectId,
+      "We can deliver.",
+    );
+    const ref = refs(candidate.id);
+    for (const scores of [
+      undefined,
+      {},
+      { criticality: 0 },
+      { criticality: 0, evidence: null },
+      { criticality: 101, evidence: 20 },
+      { criticality: 1.5, evidence: 20 },
+    ]) {
+      await expect(
+        adoptCandidateWithScores(
+          actor,
+          projectId,
+          candidate.id,
+          candidate.statement,
+          scores,
+        ),
+      ).rejects.toThrow();
+      expect((await getDoc(ref.active)).exists()).toBe(false);
+      expect((await getDoc(ref.candidate)).data().status).toBe("pending");
+    }
+    const draft = {
+      criticality: 0,
+      evidence: 100,
+      nextStep: "Test delivery",
+      helpNeeded: "Operations support",
+    };
+    const insight = {
+      description: "Initial supporting evidence",
+      sourceUrl: "https://example.com/evidence",
+    };
+    const active = await adoptCandidateWithScores(
+      actor,
+      projectId,
+      candidate.id,
+      candidate.statement,
+      draft,
+      insight,
+      "request-1",
+    );
+    expect(active).toMatchObject({ ...draft, sourceCandidateId: candidate.id });
+    const history = (await getDocs(ref.history)).docs;
+    expect(history).toHaveLength(1);
+    expect(history[0].data()).toMatchObject({
+      ...insight,
+      createdBy: actor.uid,
+      authorEmail: actor.email,
+      scoreChange: {
+        from: { criticality: null, evidence: null },
+        to: { criticality: 0, evidence: 100 },
+      },
+      managementChange: {
+        from: { nextStep: "", helpNeeded: "" },
+        to: { nextStep: draft.nextStep, helpNeeded: draft.helpNeeded },
+      },
+    });
+    expect(history[0].data().createdAt).toBeInstanceOf(Timestamp);
+    expect((await getDoc(ref.candidate)).data().adoptionInsightId).toBe(
+      "request-1",
+    );
+    // A lost acknowledgement retry confirms the existing commit without another event.
+    await adoptCandidateWithScores(
+      actor,
+      projectId,
+      candidate.id,
+      candidate.statement,
+      draft,
+      insight,
+      "request-1",
+    );
+    expect((await getDocs(ref.history)).size).toBe(1);
+    await expect(
+      adoptCandidateWithScores(
+        actor,
+        projectId,
+        candidate.id,
+        candidate.statement,
+        { ...draft, criticality: 50 },
+        insight,
+        "request-1",
+      ),
+    ).rejects.toThrow(/already been adopted/);
+  });
+  it("rejects direct unscored adoption, missing history, and forged attribution without partial writes", async () => {
+    const [candidate] = await addCandidates(
+      actor,
+      projectId,
+      "We can deliver.",
+    );
+    const ref = refs(candidate.id);
+    for (const scores of [
+      {},
+      { criticality: 60, evidence: 40, lastScoreChangeId: "missing" },
+    ]) {
+      const batch = writeBatch(serviceDb);
+      batch.update(ref.candidate, {
+        status: "adopted",
+        adoptedBy: actor.uid,
+        adoptedAt: serverTimestamp(),
+        adoptionInsightId: "missing",
+      });
+      batch.set(ref.active, {
+        statement: candidate.statement,
+        sourceCandidateId: candidate.id,
+        createdBy: actor.uid,
+        createdAt: serverTimestamp(),
+        ...scores,
+      });
+      await assertFails(batch.commit());
+    }
+    await assertFails(
+      adoptCandidateWithScores(
+        { ...actor, email: "forged@example.com" },
+        projectId,
+        candidate.id,
+        candidate.statement,
+        { criticality: 60, evidence: 40 },
+      ),
+    );
+    expect((await getDoc(ref.candidate)).data().status).toBe("pending");
+    expect((await getDoc(ref.active)).exists()).toBe(false);
+    expect((await getDocs(ref.history)).empty).toBe(true);
+  });
+  it("lets only one competing adoption win without silently accepting the losing scores", async () => {
+    const [candidate] = await addCandidates(
+      actor,
+      projectId,
+      "We can deliver.",
+    );
+    const outcomes = await Promise.allSettled([
+      adoptCandidateWithScores(
+        actor,
+        projectId,
+        candidate.id,
+        candidate.statement,
+        { criticality: 80, evidence: 20 },
+        null,
+        "request-a",
+      ),
+      adoptCandidateWithScores(
+        actor,
+        projectId,
+        candidate.id,
+        candidate.statement,
+        { criticality: 10, evidence: 90 },
+        null,
+        "request-b",
+      ),
+    ]);
+    expect(outcomes.filter((item) => item.status === "fulfilled")).toHaveLength(
+      1,
+    );
+    expect(
+      outcomes.find((item) => item.status === "rejected").reason.code,
+    ).toBe("candidate-adopted");
+    const ref = refs(candidate.id);
+    expect((await getDocs(ref.history)).size).toBe(1);
+    const winner = outcomes.find((item) => item.status === "fulfilled").value;
+    expect((await getDoc(ref.active)).data()).toMatchObject({
+      criticality: winner.criticality,
+      evidence: winner.evidence,
+    });
+  });
 });

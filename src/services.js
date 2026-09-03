@@ -380,75 +380,20 @@ export async function adoptCandidate(
   projectId,
   candidateId,
   expectedStatement,
+  draft,
+  insight = null,
+  requestId = crypto.randomUUID(),
 ) {
-  const candidateRef = doc(
-    db,
-    "projects",
+  const result = await saveAssumptionDraft(
+    user,
     projectId,
-    "candidates",
     candidateId,
+    null,
+    { ...draft, statement: expectedStatement },
+    insight,
+    { id: candidateId, statement: expectedStatement, requestId },
   );
-  const assumptionRef = doc(
-    db,
-    "projects",
-    projectId,
-    "assumptions",
-    candidateId,
-  );
-  const attempt = () =>
-    runTransaction(db, async (transaction) => {
-      const candidate = await transaction.get(candidateRef);
-      const assumption = await transaction.get(assumptionRef);
-      if (!candidate.exists())
-        throw new Error("This candidate is unavailable.");
-      const record = candidate.data();
-      if (
-        record.status === "adopted" &&
-        assumption.exists() &&
-        assumption.data().sourceCandidateId === candidateId
-      )
-        return { ...assumption.data(), id: assumption.id };
-      if (record.status !== "pending" || assumption.exists())
-        throw new Error(
-          "This candidate cannot be adopted. Refresh the candidates.",
-        );
-      if (record.statement !== expectedStatement)
-        throw new Error(
-          "This candidate was edited by someone else. Refresh and review it before adopting.",
-        );
-      const active = {
-        statement: record.statement,
-        sourceCandidateId: candidateId,
-        createdBy: user.uid,
-        createdAt: serverTimestamp(),
-      };
-      transaction.set(assumptionRef, active);
-      transaction.update(candidateRef, {
-        status: "adopted",
-        adoptedBy: user.uid,
-        adoptedAt: serverTimestamp(),
-      });
-      return { ...active, id: candidateId, createdAt: null };
-    });
-  try {
-    return await attempt();
-  } catch (error) {
-    // Rules can reject a competing commit before the SDK retries its transaction.
-    // Confirm another adoption actually completed; never retry a denied write.
-    if (error.code !== "permission-denied") throw error;
-    const [candidate, assumption] = await Promise.all([
-      getDoc(candidateRef),
-      getDoc(assumptionRef),
-    ]);
-    if (
-      candidate.exists() &&
-      candidate.data().status === "adopted" &&
-      assumption.exists() &&
-      assumption.data().sourceCandidateId === candidateId
-    )
-      return { ...assumption.data(), id: assumption.id };
-    throw error;
-  }
+  return result.assumption;
 }
 
 // One atomic save for the workspace drawer. Legacy service entry points remain
@@ -460,12 +405,75 @@ export async function saveAssumptionDraft(
   baseline,
   draft,
   insight,
+  adoption = null,
 ) {
   const { saved, values, changes, scoresChanged, entry } =
     prepareAssumptionDraft(baseline, draft, insight);
+  if (
+    adoption &&
+    (baseline !== null ||
+      adoption.id !== assumptionId ||
+      values.statement !== adoption.statement ||
+      ![values.criticality, values.evidence].every(
+        (value) => Number.isInteger(value) && value >= 0 && value <= 100,
+      ))
+  )
+    throw new Error(
+      "Enter both initial scores as whole numbers from 0–100 before adopting.",
+    );
   const creating = baseline === null;
   const reference = doc(db, "projects", projectId, "assumptions", assumptionId);
-  const insightRef = doc(collection(reference, "insights"));
+  const insightRef = adoption
+    ? doc(reference, "insights", adoption.requestId)
+    : doc(collection(reference, "insights"));
+  const candidateRef = adoption
+    ? doc(db, "projects", projectId, "candidates", adoption.id)
+    : null;
+  function checkCandidate(candidate, current, history) {
+    if (!candidate)
+      throw new Error(
+        "This candidate is unavailable. Close the drawer and refresh candidates.",
+      );
+    if (candidate.status === "adopted") {
+      const sameRequest =
+        candidate.adoptionInsightId === adoption.requestId &&
+        candidate.adoptedBy === user.uid;
+      const sameValues =
+        history &&
+        history.createdBy === user.uid &&
+        history.scoreChange?.to.criticality === values.criticality &&
+        history.scoreChange?.to.evidence === values.evidence &&
+        (history.managementChange?.to.nextStep ?? "") === values.nextStep &&
+        (history.managementChange?.to.helpNeeded ?? "") === values.helpNeeded &&
+        ["description", "sourceUrl", "classification"].every(
+          (key) => (history[key] ?? null) === (entry?.[key] ?? null),
+        );
+      if (
+        sameRequest &&
+        sameValues &&
+        candidate.statement === values.statement &&
+        current?.sourceCandidateId === adoption.id
+      )
+        return { assumption: { ...current, id: assumptionId }, insight: null };
+      const error = new Error(
+        "This candidate has already been adopted. Your draft is retained. Close the drawer and refresh candidates to review the saved assumption.",
+      );
+      error.code = "candidate-adopted";
+      throw error;
+    }
+    if (
+      candidate.status !== "pending" ||
+      candidate.statement !== adoption.statement
+    ) {
+      const error = new Error(
+        "This candidate was edited by someone else. Review its latest wording before adopting.",
+      );
+      error.code = "candidate-conflict";
+      error.current = { ...candidate, id: adoption.id };
+      throw error;
+    }
+    return null;
+  }
   function assertBaseline(current) {
     if (!current) return;
     const before = editableAssumption(current);
@@ -492,6 +500,16 @@ export async function saveAssumptionDraft(
     runTransaction(db, async (transaction) => {
       const snapshot = await transaction.get(reference);
       const current = snapshot.exists() ? snapshot.data() : null;
+      if (adoption) {
+        const candidate = await transaction.get(candidateRef);
+        const history = await transaction.get(insightRef);
+        const completed = checkCandidate(
+          candidate.exists() ? candidate.data() : null,
+          current,
+          history.exists() ? history.data() : null,
+        );
+        if (completed) return completed;
+      }
       if (!creating && !current)
         throw new Error("This assumption is unavailable.");
       assertBaseline(current);
@@ -548,6 +566,7 @@ export async function saveAssumptionDraft(
       let result;
       if (creating) {
         const data = {
+          ...(adoption ? { sourceCandidateId: adoption.id } : {}),
           statement: values.statement,
           ...(scoresChanged
             ? { criticality: values.criticality, evidence: values.evidence }
@@ -583,6 +602,13 @@ export async function saveAssumptionDraft(
         };
       }
       if (record) transaction.set(insightRef, record);
+      if (adoption)
+        transaction.update(candidateRef, {
+          status: "adopted",
+          adoptedBy: user.uid,
+          adoptedAt: serverTimestamp(),
+          adoptionInsightId: insightRef.id,
+        });
       return {
         assumption: { ...result, id: assumptionId },
         insight: record
@@ -602,6 +628,18 @@ export async function saveAssumptionDraft(
       latest = await getDocFromServer(reference);
     } catch {
       throw error;
+    }
+    if (adoption) {
+      const [candidate, history] = await Promise.all([
+        getDocFromServer(candidateRef),
+        getDocFromServer(insightRef),
+      ]);
+      const completed = checkCandidate(
+        candidate.exists() ? candidate.data() : null,
+        latest.exists() ? latest.data() : null,
+        history.exists() ? history.data() : null,
+      );
+      if (completed) return completed;
     }
     if (latest.exists()) assertBaseline(latest.data());
     throw error;

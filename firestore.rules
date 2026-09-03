@@ -258,6 +258,8 @@ match /candidates/{candidateId} {
     let path = /databases/$(database)/documents/projects/$(projectId)/assumptions/$(candidateId);
     let active = getAfter(path).data;
     return !exists(path) && active.sourceCandidateId == candidateId
+      && active.lastScoreChangeId == request.resource.data.adoptionInsightId
+      && active.criticality is int && active.evidence is int
       && active.statement == resource.data.statement
       && active.createdBy == request.auth.uid && active.createdAt == request.time;
   }
@@ -274,7 +276,7 @@ match /candidates/{candidateId} {
       && validCandidate(request.resource.data)
       && request.resource.data.updatedBy == request.auth.uid
       && request.resource.data.updatedAt == request.time)
-    || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'adoptedBy', 'adoptedAt'])
+    || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'adoptedBy', 'adoptedAt', 'adoptionInsightId'])
       && request.resource.data.status == 'adopted'
       && request.resource.data.adoptedBy == request.auth.uid
       && request.resource.data.adoptedAt == request.time
@@ -292,7 +294,9 @@ match /assumptions/{assumptionId} {
       && after.adoptedBy == request.auth.uid && after.adoptedAt == request.time
       && request.resource.data.statement == before.statement
       && request.resource.data.createdAt == request.time
-      && !('criticality' in request.resource.data) && !('evidence' in request.resource.data);
+      && request.resource.data.criticality is int && request.resource.data.evidence is int
+      && request.resource.data.lastScoreChangeId == after.adoptionInsightId
+      && hasScoreChangeRecord();
   }
 
   function scorePair(data) {

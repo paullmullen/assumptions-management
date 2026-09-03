@@ -175,6 +175,7 @@ export default function ProjectWorkspace({ project, user, onBack }) {
         view={view}
         desktop={desktop}
         onDrawerChange={setDrawerOpen}
+        onAdoptionStarted={() => setView("candidates")}
         onAdopted={() => {
           setView("portfolio");
           setFocusTarget({ id: "project-assumptions" });

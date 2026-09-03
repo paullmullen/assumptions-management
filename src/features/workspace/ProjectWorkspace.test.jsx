@@ -238,6 +238,24 @@ it("protects candidate capture and adoption returns to the sole portfolio list",
     screen.getByLabelText("Candidate assumptions — one per line"),
   ).toHaveValue("");
   click("Adopt into portfolio");
+  expect(services.adoptCandidate).not.toHaveBeenCalled();
+  expect(
+    screen.getByRole("button", { name: "Adopt with scores" }),
+  ).toBeDisabled();
+  fireEvent.change(screen.getByLabelText("Criticality if wrong"), {
+    target: { value: "0" },
+  });
+  fireEvent.change(screen.getByLabelText("Strength of supporting evidence"), {
+    target: { value: "50" },
+  });
+  services.adoptCandidate.mockResolvedValue({
+    id: "c",
+    statement: "Delivery costs remain manageable.",
+    sourceCandidateId: "c",
+    criticality: 0,
+    evidence: 50,
+  });
+  click("Adopt with scores");
   await waitFor(() =>
     expect(
       screen.getByRole("group", {
@@ -248,7 +266,7 @@ it("protects candidate capture and adoption returns to the sole portfolio list",
   expect(
     screen.getAllByRole("group", { name: /^Saved assumption:/ }),
   ).toHaveLength(3);
-  expect(screen.getByLabelText("Criticality if wrong")).toHaveValue("");
+  expect(screen.getByLabelText("Criticality if wrong")).toHaveValue("0");
 });
 it("never publishes an unpublished review through the navigation guard", async () => {
   reviews.captureReview.mockResolvedValue({
@@ -386,4 +404,150 @@ it("keeps permission errors beside the switch after a rollback snapshot and clea
   expect(
     screen.queryByText(/not saved: permission denied/),
   ).not.toBeInTheDocument();
+});
+
+it("cancels an untouched adoption without writing and protects partially scored drafts", async () => {
+  render(app());
+  await screen.findByRole("button", { name: /^Candidates \(1\)/ });
+  click(/^Candidates/);
+  click("Adopt into portfolio");
+  expect(screen.getByLabelText("Assumption")).toHaveAttribute("readonly");
+  expect(screen.getByLabelText("Criticality if wrong")).toHaveValue("");
+  click("Close assumption");
+  expect(services.adoptCandidate).not.toHaveBeenCalled();
+  click("Adopt into portfolio");
+  fireEvent.change(screen.getByLabelText("Criticality if wrong"), {
+    target: { value: "0" },
+  });
+  expect(
+    screen.getByRole("button", { name: "Adopt with scores" }),
+  ).toBeDisabled();
+  click("Close assumption");
+  expect(modal()).toHaveTextContent("Candidate adoption");
+  click("Keep editing");
+  expect(screen.getByLabelText("Criticality if wrong")).toHaveValue("0");
+  click("Portfolio");
+  click("Discard changes");
+  click(/^Candidates/);
+  expect(
+    screen.getByRole("button", { name: "Adopt into portfolio" }),
+  ).toBeVisible();
+  expect(services.adoptCandidate).not.toHaveBeenCalled();
+});
+
+it("retains adoption scores and insight on failure and requires review of changed candidate wording", async () => {
+  services.adoptCandidate.mockRejectedValueOnce(new Error("offline"));
+  render(app());
+  await screen.findByRole("button", { name: /^Candidates \(1\)/ });
+  click(/^Candidates/);
+  click("Adopt into portfolio");
+  fireEvent.change(screen.getByLabelText("Criticality if wrong"), {
+    target: { value: "90" },
+  });
+  fireEvent.change(screen.getByLabelText("Strength of supporting evidence"), {
+    target: { value: "0" },
+  });
+  fireEvent.change(note(), { target: { value: "Initial judgment" } });
+  click("Adopt with scores");
+  await screen.findByText(/Changes could not be saved/);
+  expect(note()).toHaveValue("Initial judgment");
+  services.adoptCandidate.mockRejectedValueOnce({
+    code: "candidate-conflict",
+    current: {
+      id: "c",
+      statement: "Delivery costs stay below our target.",
+      status: "pending",
+    },
+  });
+  click("Adopt with scores");
+  await screen.findByText("The candidate wording changed");
+  expect(
+    screen.getByRole("button", { name: "Adopt with scores" }),
+  ).toBeDisabled();
+  click("Use latest candidate wording");
+  expect(screen.getByLabelText("Assumption")).toHaveValue(
+    "Delivery costs stay below our target.",
+  );
+  expect(screen.getByLabelText("Criticality if wrong")).toHaveValue("90");
+  expect(note()).toHaveValue("Initial judgment");
+  services.adoptCandidate.mockResolvedValueOnce({
+    id: "c",
+    statement: "Delivery costs stay below our target.",
+    sourceCandidateId: "c",
+    criticality: 90,
+    evidence: 0,
+  });
+  click("Adopt with scores");
+  await screen.findByRole("group", {
+    name: "Saved assumption: Delivery costs stay below our target.",
+  });
+  const calls = services.adoptCandidate.mock.calls;
+  expect(calls[2][3]).toBe("Delivery costs stay below our target.");
+  expect(calls[2][6]).toBe(calls[0][6]); // Safe retry retains its operation identity.
+  click(/^Candidates/);
+  expect(
+    screen.queryByRole("button", { name: "Adopt into portfolio" }),
+  ).not.toBeInTheDocument();
+});
+
+it("does not overwrite a candidate adopted by another user", async () => {
+  services.adoptCandidate.mockRejectedValueOnce({
+    code: "candidate-adopted",
+    message: "This candidate has already been adopted. Your draft is retained.",
+  });
+  render(app());
+  await screen.findByRole("button", { name: /^Candidates \(1\)/ });
+  click(/^Candidates/);
+  click("Adopt into portfolio");
+  fireEvent.change(screen.getByLabelText("Criticality if wrong"), {
+    target: { value: "40" },
+  });
+  fireEvent.change(screen.getByLabelText("Strength of supporting evidence"), {
+    target: { value: "70" },
+  });
+  click("Adopt with scores");
+  await screen.findByText(/already been adopted/);
+  expect(screen.getByLabelText("Strength of supporting evidence")).toHaveValue(
+    "70",
+  );
+  expect(services.saveAssumptionDraft).not.toHaveBeenCalled();
+});
+
+it("saves an adoption before switching to another candidate and keeps its drawer visible", async () => {
+  services.loadCandidates.mockResolvedValue([
+    { id: "c", statement: "First candidate", status: "pending" },
+    { id: "d", statement: "Second candidate", status: "pending" },
+  ]);
+  services.adoptCandidate.mockResolvedValue({
+    id: "c",
+    statement: "First candidate",
+    sourceCandidateId: "c",
+    criticality: 10,
+    evidence: 20,
+  });
+  render(app());
+  await screen.findByRole("button", { name: /^Candidates \(2\)/ });
+  click(/^Candidates/);
+  const adopt = (statement) =>
+    within(
+      screen.getByRole("group", { name: `Candidate: ${statement}` }),
+    ).getByRole("button", { name: "Adopt into portfolio" });
+  fireEvent.click(adopt("First candidate"));
+  expect(adopt("First candidate")).toBeDisabled();
+  fireEvent.change(screen.getByLabelText("Criticality if wrong"), {
+    target: { value: "10" },
+  });
+  fireEvent.change(screen.getByLabelText("Strength of supporting evidence"), {
+    target: { value: "20" },
+  });
+  fireEvent.click(adopt("Second candidate"));
+  click("Save and continue");
+  await waitFor(() =>
+    expect(screen.getByLabelText("Assumption")).toHaveValue("Second candidate"),
+  );
+  expect(screen.getByLabelText("Criticality if wrong")).toHaveValue("");
+  expect(
+    screen.getByRole("button", { name: "Adopt with scores" }),
+  ).toBeVisible();
+  expect(services.adoptCandidate).toHaveBeenCalledTimes(1);
 });

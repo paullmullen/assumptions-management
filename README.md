@@ -90,7 +90,7 @@ The optional [guided start](docs/Guided-Start.md) is available inside each proje
 
 ## Candidate workshop
 
-[Candidate capture and adoption](docs/Candidate-Capture-and-Adoption.md) supports multiline candidate entry, wording refinement, and explicit adoption into the active portfolio. Deploy the updated Firestore rules with Hosting using the existing development deployment command.
+[Candidate capture and adoption](docs/Candidate-Capture-and-Adoption.md) supports multiline candidate entry, wording refinement, and explicit adoption with both initial scores in the shared drawer. See [Slice 2B](docs/Workspace-Slice-2B.md). Deploy the updated Firestore rules with Hosting using the existing development deployment command.
 
 ## Optional formal reviews (Slice 2A)
 
