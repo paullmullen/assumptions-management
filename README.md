@@ -8,6 +8,14 @@ Select a numbered chart point, chart-key entry, or the saved list's “Select as
 
 Manual check: select a point and edit evidence in the selected area. Switch to another point and back to confirm the draft remains. Save and confirm the point moves. Repeat with “Revert changes” and switch projects to verify isolation. Selection alone must not move or scroll the chart.
 
+## Project collaboration
+
+Owners can create email-addressed invitation links, inspect members, revoke invitations, and remove access. Share the copied link with the intended person; their verified account can accept and work in the shared project. Invitation emails are not sent automatically. See [Project collaboration](docs/Project-Collaboration.md) for deployment, security, and two-account acceptance checks.
+
+## Formal reviews
+
+Use **Formal reviews → Start review** to inspect saved state and changes since the previous published review. Add notes and publish a preserved snapshot with publisher and time. Refresh saved state before publishing when needed. Earlier reviews remain unchanged while ordinary project editing continues. See [Formal reviews](docs/Formal-Reviews.md) for scope, limits, and acceptance checks. Deploy **both Hosting and Firestore rules** for this feature.
+
 ## Development setup
 
 Prerequisites: Node.js 22+, Java (required by the Firestore emulator), and Firebase CLI authentication only when deploying. This repository uses the dedicated Firebase development project `assumptions-management` in Firestore location `nam5`. Production must use a separate Firebase project and is not configured in this slice.
@@ -68,4 +76,12 @@ No Cloud Functions are deployed in Slice 1. Firebase's default hosted authentica
 
 The project is the tenant boundary. Firestore rules require a verified user with an active membership for each project read or write. Project creation is one client-side atomic batch that creates both the project and the creator's owner membership. Rules use `getAfter()` and `existsAfter()` to require the matching pair.
 
-Existing project documents and membership records are never client-editable in Slice 1. This keeps project creator identity, membership user ID, membership project ID, owner designation, and active status immutable. The Firebase Emulator rules tests prove atomic creation and reject fraudulent ownership and cross-project access.
+Project creator identity and the original owner designation remain immutable. Invited member records can be activated through a matching invitation acceptance transaction or deactivated by the owner with a matching roster update and removal event. Rules enforce these transitions and project isolation.
+
+## Guided start and MVP status
+
+The optional [guided start](docs/Guided-Start.md) is available inside each project. See the [MVP status audit](docs/MVP-Status.md) for implemented behavior and remaining requirements.
+
+## Candidate workshop
+
+[Candidate capture and adoption](docs/Candidate-Capture-and-Adoption.md) supports multiline candidate entry, wording refinement, and explicit adoption into the active portfolio. Deploy the updated Firestore rules with Hosting using the existing development deployment command.

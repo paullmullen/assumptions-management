@@ -22,11 +22,20 @@ import {
   signInWithEmailAndPassword,
   signOut,
 } from "firebase/auth";
+import MembersPanel from "./features/members/MembersPanel.jsx";
+import InvitationScreen from "./features/members/InvitationScreen.jsx";
+import ReviewsPanel from "./features/reviews/ReviewsPanel.jsx";
 import ProjectBriefCard from "./features/projectBrief/ProjectBriefCard.jsx";
+import GuidedStart from "./features/guidedStart/GuidedStart.jsx";
 import AssumptionsPanel from "./features/assumptions/AssumptionsPanel.jsx";
 import { auth, isFirebaseConfigured } from "./firebase.js";
 import { authenticationErrorMessage } from "./authErrors.js";
-import { createProject, ensureUserProfile, loadProjects } from "./services.js";
+import {
+  createProject,
+  ensureUserProfile,
+  loadProjects,
+  watchProjects,
+} from "./services.js";
 import {
   refreshVerificationState,
   sendVerificationEmail,
@@ -304,8 +313,27 @@ function ProjectScreen({ user, project, onBack }) {
       </Button>
       <Title level={1}>{project.name}</Title>
       {project.description && <Paragraph>{project.description}</Paragraph>}
-      <ProjectBriefCard projectId={project.id} userId={user.uid} />
-      <AssumptionsPanel projectId={project.id} user={user} />
+      <GuidedStart projectId={project.id} userId={user.uid} />
+      <section
+        id="project-promises"
+        tabIndex={-1}
+        aria-label="Project promises"
+      >
+        <ProjectBriefCard projectId={project.id} userId={user.uid} />
+      </section>
+      <section
+        id="project-assumptions"
+        tabIndex={-1}
+        aria-label="Assumption portfolio"
+      >
+        <AssumptionsPanel projectId={project.id} user={user} />
+      </section>
+      <section id="project-reviews" tabIndex={-1} aria-label="Project reviews">
+        <ReviewsPanel key={project.id} projectId={project.id} user={user} />
+      </section>
+      {project.creatorId === user.uid && (
+        <MembersPanel key={project.id} projectId={project.id} user={user} />
+      )}
     </Content>
   );
 }
@@ -319,7 +347,10 @@ function Application() {
   const [pathname, setPathname] = useState(window.location.pathname);
 
   useEffect(() => {
-    return onAuthStateChanged(auth, async (nextUser) => {
+    let generation = 0;
+    const unsubscribe = onAuthStateChanged(auth, async (nextUser) => {
+      const current = ++generation;
+      setProjects([]);
       if (!nextUser) {
         setUser(null);
         setProjects([]);
@@ -329,21 +360,35 @@ function Application() {
       }
 
       const isVerified = await refreshVerificationState(nextUser);
+      if (current !== generation) return;
       const refreshedUser = auth.currentUser;
       setUser(refreshedUser);
-      if (isVerified && refreshedUser) {
-        setProjectsLoading(true);
-        try {
-          setProjects(await loadProjects(refreshedUser));
-        } catch {
-          message.error("Projects could not be loaded.");
-        } finally {
-          setProjectsLoading(false);
-        }
-      }
-      setAuthLoading(false);
+      setProjectsLoading(Boolean(isVerified && refreshedUser));
+      if (current === generation) setAuthLoading(false);
     });
+    return () => {
+      generation += 1;
+      unsubscribe();
+    };
   }, [message]);
+
+  useEffect(() => {
+    if (!user?.emailVerified) return;
+    return watchProjects(
+      user,
+      (items) => {
+        setProjects(items);
+        setProjectsLoading(false);
+      },
+      () => {
+        setProjects([]);
+        setProjectsLoading(false);
+        message.error(
+          "Project access could not be refreshed. Please sign in again.",
+        );
+      },
+    );
+  }, [user, message]);
 
   useEffect(() => {
     const updatePath = () => setPathname(window.location.pathname);
@@ -352,6 +397,7 @@ function Application() {
   }, []);
 
   const isCreatingProject = pathname === "/projects/new";
+  const invitationId = pathname.match(/^\/invitations\/([^/]+)$/)?.[1];
 
   const projectId = useMemo(() => {
     if (pathname === "/projects/new") {
@@ -368,6 +414,7 @@ function Application() {
       !user?.emailVerified ||
       projectsLoading ||
       isCreatingProject ||
+      invitationId ||
       projectId ||
       projects.length !== 1
     ) {
@@ -375,7 +422,14 @@ function Application() {
     }
 
     routeTo(`/projects/${projects[0].id}`);
-  }, [user, projectsLoading, isCreatingProject, projectId, projects]);
+  }, [
+    user,
+    projectsLoading,
+    isCreatingProject,
+    invitationId,
+    projectId,
+    projects,
+  ]);
 
   async function createAndOpen(values) {
     try {
@@ -420,8 +474,23 @@ function Application() {
         <main className="loading-page">
           <Spin size="large" />
         </main>
+      ) : invitationId ? (
+        <InvitationScreen
+          key={`${user.uid}:${invitationId}`}
+          invitationId={invitationId}
+          user={user}
+          onBack={() => routeTo("/projects")}
+          onAccepted={async (id) => {
+            const items = await loadProjects(user);
+            if (!items.some((item) => item.id === id))
+              throw new Error("Project unavailable.");
+            setProjects(items);
+            routeTo(`/projects/${id}`);
+          }}
+        />
       ) : project ? (
         <ProjectScreen
+          key={`${user.uid}:${project.id}`}
           onBack={() => routeTo("/projects")}
           project={project}
           user={user}

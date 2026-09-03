@@ -1,3 +1,4 @@
+import { captureReview } from "../../src/features/reviews/reviewService.js";
 import { readFileSync } from "node:fs";
 import {
   afterAll,
@@ -30,6 +31,11 @@ import {
   updateAssumptionScores,
   saveAssumptionChanges,
   addInsight,
+  addCandidates,
+  editCandidate,
+  adoptCandidate,
+  loadCandidates,
+  loadAssumptions,
 } from "../../src/services.js";
 let serviceDb;
 vi.mock("../../src/firebase.js", () => ({
@@ -1142,5 +1148,847 @@ describe("Score notes service with Firestore rules", () => {
     expect(
       (await getDocs(collection(serviceDb, parent, "insights"))).empty,
     ).toBe(true);
+  });
+});
+
+describe("formal review publication", () => {
+  const email = "owner@example.org";
+  const values = () => ({
+    schemaVersion: 1,
+    title: "First review",
+    notes: "Baseline",
+    previousReviewId: null,
+    capturedAt: Date.now(),
+    assumptions: [],
+    promises: { customerPromise: "", investorPromise: "", coworkerPromise: "" },
+    publishedBy: ownerId,
+    publisherEmail: email,
+    publishedAt: serverTimestamp(),
+  });
+  const ownerDb = () =>
+    testEnv
+      .authenticatedContext(ownerId, { email_verified: true, email })
+      .firestore();
+  it("allows a member to publish and read but never edit or delete a snapshot", async () => {
+    await seedPrivateProject();
+    const ref = doc(ownerDb(), "projects", projectId, "reviews", "r1");
+    await assertSucceeds(setDoc(ref, values()));
+    await assertSucceeds(getDoc(ref));
+    await assertFails(updateDoc(ref, { notes: "Rewrite history" }));
+    await assertFails(deleteDoc(ref));
+  });
+  it("blocks nonmembers, unverified users, inactive members, and anonymous access", async () => {
+    await seedPrivateProject();
+    await setDoc(
+      doc(ownerDb(), "projects", projectId, "reviews", "r1"),
+      values(),
+    );
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(
+        doc(
+          context.firestore(),
+          "users",
+          "inactive",
+          "projectMemberships",
+          projectId,
+        ),
+        { ...membership(projectId, "inactive"), active: false },
+      );
+    });
+    const contexts = [
+      verifiedContext(otherUserId),
+      testEnv.authenticatedContext(ownerId, { email_verified: false, email }),
+      testEnv.authenticatedContext("inactive", { email_verified: true, email }),
+      testEnv.unauthenticatedContext(),
+    ];
+    for (const context of contexts) {
+      const db = context.firestore();
+      await assertFails(
+        getDocs(collection(db, "projects", projectId, "reviews")),
+      );
+      await assertFails(
+        getDoc(doc(db, "projects", projectId, "reviews", "r1")),
+      );
+      await assertFails(
+        setDoc(doc(db, "projects", projectId, "reviews", "r2"), values()),
+      );
+    }
+  });
+  it("rejects forged attribution, client publication time, invalid envelopes, and outside baselines", async () => {
+    await seedPrivateProject();
+    const ref = doc(ownerDb(), "projects", projectId, "reviews", "r1");
+    for (const patch of [
+      { publishedBy: otherUserId },
+      { publisherEmail: "fake@example.org" },
+      { publishedAt: Timestamp.fromMillis(1) },
+      { title: " " },
+      { assumptions: "bad" },
+      { extra: true },
+      { previousReviewId: "foreign-review" },
+    ]) {
+      await assertFails(setDoc(ref, { ...values(), ...patch }));
+    }
+    await setDoc(ref, values());
+    await assertSucceeds(
+      setDoc(doc(ownerDb(), "projects", projectId, "reviews", "r2"), {
+        ...values(),
+        previousReviewId: "r1",
+      }),
+    );
+  });
+  it("publishes through the service and safely retries an acknowledged or uncertain commit", async () => {
+    await seedPrivateProject();
+    serviceDb = ownerDb();
+    const { publishReview, loadReviews } =
+      await import("../../src/features/reviews/reviewService.js");
+    const payload = values();
+    for (const field of [
+      "schemaVersion",
+      "publishedBy",
+      "publisherEmail",
+      "publishedAt",
+    ])
+      delete payload[field];
+    const user = { uid: ownerId, email };
+    await publishReview(user, projectId, "stable-id", payload);
+    await publishReview(user, projectId, "stable-id", payload);
+    const reviews = await loadReviews(projectId);
+    await expect(
+      publishReview(user, projectId, "stable-id", {
+        ...payload,
+        notes: "Changed after uncertain response",
+      }),
+    ).rejects.toThrow("already published");
+    expect(reviews).toHaveLength(1);
+    expect(reviews[0].publishedAt.toMillis()).toBeGreaterThan(0);
+  });
+});
+
+it("compares later saved work while preserving the first published portfolio", async () => {
+  await seedPrivateProject();
+  serviceDb = testEnv
+    .authenticatedContext(ownerId, {
+      email_verified: true,
+      email: "owner@example.org",
+    })
+    .firestore();
+  const user = { uid: ownerId, email: "owner@example.org" };
+  const { captureReview, publishReview, loadReviews } =
+    await import("../../src/features/reviews/reviewService.js");
+  const { compareReview } =
+    await import("../../src/features/reviews/reviewValues.js");
+  const ref = doc(serviceDb, "projects", projectId, "assumptions", "a");
+  await setDoc(ref, {
+    statement: "Customers adopt",
+    createdBy: ownerId,
+    createdAt: serverTimestamp(),
+    criticality: 90,
+    evidence: 20,
+  });
+  const first = await captureReview(projectId);
+  expect(first.previous).toBeNull();
+  await publishReview(user, projectId, "baseline", {
+    ...first.snapshot,
+    title: "Baseline",
+    notes: "Reviewed",
+    previousReviewId: null,
+  });
+  await saveAssumptionChanges(
+    user,
+    projectId,
+    "a",
+    { criticality: 90, evidence: 60 },
+    { description: "Pilot completed" },
+    { nextStep: "Repeat pilot", helpNeeded: "Recruit participants" },
+  );
+  await addInsight(user, projectId, "a", {
+    description: "Additional judgment without a score change",
+  });
+  const next = await captureReview(projectId);
+  expect(next.previous.id).toBe("baseline");
+  const changes = compareReview(next.snapshot, next.previous);
+  expect(changes[0].changes).toContainEqual({
+    key: "evidence",
+    from: 20,
+    to: 60,
+  });
+  expect(changes[0].newInsights).toHaveLength(2);
+  const [baseline] = await loadReviews(projectId);
+  expect(baseline.assumptions[0].evidence).toBe(20);
+  expect(baseline.assumptions[0].insights).toHaveLength(0);
+});
+
+describe("project invitations and collaboration", () => {
+  const ownerEmail = "owner@example.org";
+  const recipientEmail = "collaborator@example.org";
+  const recipientId = "collaborator";
+  const user = { uid: recipientId, email: recipientEmail };
+  const owner = { uid: ownerId, email: ownerEmail };
+  const context = (uid, email, verified = true) =>
+    testEnv.authenticatedContext(uid, { email, email_verified: verified });
+  const ownerDb = () => context(ownerId, ownerEmail).firestore();
+  const recipientDb = () => context(recipientId, recipientEmail).firestore();
+  const invitation = (patch = {}) => ({
+    projectId,
+    recipientEmail,
+    invitedBy: ownerId,
+    inviterEmail: ownerEmail,
+    createdAt: serverTimestamp(),
+    expiresAt: Timestamp.fromMillis(Date.now() + 86400000),
+    status: "pending",
+    ...patch,
+  });
+  async function setupInvite(id = "invite-1") {
+    await seedPrivateProject();
+    await setDoc(doc(ownerDb(), "projectInvitations", id), invitation());
+    return id;
+  }
+  async function join(id = "invite-1") {
+    serviceDb = recipientDb();
+    const { acceptInvitation } =
+      await import("../../src/features/members/memberService.js");
+    return acceptInvitation(user, id);
+  }
+
+  it("allows only the owner to invite and list invitations", async () => {
+    await seedPrivateProject();
+    serviceDb = ownerDb();
+    const { inviteMember, loadInvitations } =
+      await import("../../src/features/members/memberService.js");
+    const id = await inviteMember(
+      owner,
+      projectId,
+      " Collaborator@Example.org ",
+    );
+    expect((await loadInvitations(projectId))[0].recipientEmail).toBe(
+      recipientEmail,
+    );
+    const otherDb = context(otherUserId, "outsider@example.org").firestore();
+    await assertFails(
+      setDoc(
+        doc(otherDb, "projectInvitations", "forged"),
+        invitation({
+          invitedBy: otherUserId,
+          inviterEmail: "outsider@example.org",
+        }),
+      ),
+    );
+    await assertFails(getDocs(collection(otherDb, "projectInvitations")));
+    await assertFails(getDoc(doc(otherDb, "projectInvitations", id)));
+    await assertFails(
+      getDoc(
+        doc(
+          testEnv.unauthenticatedContext().firestore(),
+          "projectInvitations",
+          id,
+        ),
+      ),
+    );
+    await assertFails(
+      getDoc(
+        doc(
+          context(recipientId, recipientEmail, false).firestore(),
+          "projectInvitations",
+          id,
+        ),
+      ),
+    );
+  });
+
+  it("keeps project content private until the intended verified recipient accepts", async () => {
+    await setupInvite();
+    const db = recipientDb();
+    await assertSucceeds(getDoc(doc(db, "projectInvitations", "invite-1")));
+    await assertFails(getDoc(doc(db, "projects", projectId)));
+    await assertFails(
+      getDocs(collection(db, "projects", projectId, "assumptions")),
+    );
+    expect(await join()).toBe(projectId);
+    await assertSucceeds(getDoc(doc(db, "projects", projectId)));
+    await assertSucceeds(
+      setDoc(doc(db, "projects", projectId, "assumptions", "shared"), {
+        statement: "We can deliver",
+        createdBy: recipientId,
+        createdAt: serverTimestamp(),
+      }),
+    );
+    serviceDb = db;
+    await saveAssumptionChanges(
+      user,
+      projectId,
+      "shared",
+      { criticality: 80, evidence: 30 },
+      { description: "Member judgment" },
+    );
+    const { captureReview, publishReview } =
+      await import("../../src/features/reviews/reviewService.js");
+    const review = await captureReview(projectId);
+    await publishReview(user, projectId, "member-review", {
+      ...review.snapshot,
+      title: "Team review",
+      notes: "Shared",
+      previousReviewId: null,
+    });
+    await assertSucceeds(
+      getDoc(doc(ownerDb(), "projects", projectId, "reviews", "member-review")),
+    );
+    await seedPrivateProject("unrelated", otherUserId);
+    await assertFails(getDoc(doc(db, "projects", "unrelated")));
+    await assertFails(
+      setDoc(doc(db, "projects", "unrelated", "assumptions", "injected"), {
+        statement: "No",
+        createdBy: recipientId,
+        createdAt: serverTimestamp(),
+      }),
+    );
+  });
+
+  it("normalizes the verified token's email case and supports repeat acceptance", async () => {
+    await setupInvite();
+    serviceDb = context(recipientId, "Collaborator@Example.org").firestore();
+    const { acceptInvitation } =
+      await import("../../src/features/members/memberService.js");
+    expect(
+      await acceptInvitation(
+        { uid: recipientId, email: "Collaborator@Example.org" },
+        "invite-1",
+      ),
+    ).toBe(projectId);
+    expect(await join()).toBe(projectId);
+    const record = await adminDocument("projectInvitations/invite-1");
+    expect(record.data().acceptedBy).toBe(recipientId);
+    expect(record.data().acceptedAt.toMillis()).toBeGreaterThan(0);
+  });
+
+  it("rejects self-granted membership, partial acceptance, wrong recipients, and ownership escalation", async () => {
+    await setupInvite();
+    const db = recipientDb();
+    const member = {
+      projectId,
+      userId: recipientId,
+      role: "member",
+      active: true,
+      createdAt: serverTimestamp(),
+      invitationId: "invite-1",
+      email: recipientEmail,
+    };
+    await assertFails(
+      setDoc(
+        doc(db, "users", recipientId, "projectMemberships", projectId),
+        member,
+      ),
+    );
+    await assertFails(
+      updateDoc(doc(db, "projectInvitations", "invite-1"), {
+        status: "accepted",
+        acceptedBy: recipientId,
+        acceptedAt: serverTimestamp(),
+      }),
+    );
+    const batch = writeBatch(db);
+    batch.set(doc(db, "users", recipientId, "projectMemberships", projectId), {
+      ...member,
+      role: "owner",
+    });
+    batch.set(doc(db, "projects", projectId, "members", recipientId), {
+      ...member,
+      role: "owner",
+    });
+    batch.update(doc(db, "projectInvitations", "invite-1"), {
+      status: "accepted",
+      acceptedBy: recipientId,
+      acceptedAt: serverTimestamp(),
+    });
+    await assertFails(batch.commit());
+    const wrongDb = context("wrong", "wrong@example.org").firestore();
+    await assertFails(
+      updateDoc(doc(wrongDb, "projectInvitations", "invite-1"), {
+        status: "accepted",
+        acceptedBy: "wrong",
+        acceptedAt: serverTimestamp(),
+      }),
+    );
+    expect(
+      (
+        await adminDocument(
+          `users/${recipientId}/projectMemberships/${projectId}`,
+        )
+      ).exists(),
+    ).toBe(false);
+  });
+
+  it("rejects expired and revoked invitations and preserves terminal state", async () => {
+    await setupInvite();
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await updateDoc(doc(ctx.firestore(), "projectInvitations", "invite-1"), {
+        expiresAt: Timestamp.fromMillis(1),
+      });
+    });
+    await expect(join()).rejects.toBeDefined();
+    await setDoc(
+      doc(ownerDb(), "projectInvitations", "revocable"),
+      invitation(),
+    );
+    serviceDb = ownerDb();
+    const { revokeInvitation } =
+      await import("../../src/features/members/memberService.js");
+    await revokeInvitation("revocable");
+    await expect(join("revocable")).rejects.toThrow("no longer pending");
+    await assertFails(
+      updateDoc(doc(ownerDb(), "projectInvitations", "revocable"), {
+        status: "pending",
+      }),
+    );
+    await assertFails(
+      deleteDoc(doc(ownerDb(), "projectInvitations", "revocable")),
+    );
+  });
+
+  it("removes membership atomically, denies further access, preserves history, and permits a fresh invitation", async () => {
+    await setupInvite();
+    await join();
+    serviceDb = recipientDb();
+    await setDoc(doc(serviceDb, "projects", projectId, "assumptions", "a"), {
+      statement: "Member work",
+      createdBy: recipientId,
+      createdAt: serverTimestamp(),
+    });
+    await addInsight(user, projectId, "a", {
+      description: "Keep this attribution",
+    });
+    serviceDb = ownerDb();
+    const { removeMember, loadMembers, inviteMember } =
+      await import("../../src/features/members/memberService.js");
+    expect((await loadMembers(projectId))[0].email).toBe(recipientEmail);
+    const outstanding = await inviteMember(owner, projectId, recipientEmail);
+    await removeMember(owner, projectId, recipientId);
+    expect((await loadMembers(projectId))[0].active).toBe(false);
+    await expect(join(outstanding)).rejects.toThrow(
+      "removed after this invitation",
+    );
+    const staleDb = recipientDb();
+    const staleBatch = writeBatch(staleDb);
+    const staleData = {
+      projectId,
+      userId: recipientId,
+      role: "member",
+      active: true,
+      createdAt: serverTimestamp(),
+      invitationId: outstanding,
+      email: recipientEmail,
+    };
+    staleBatch.set(
+      doc(staleDb, "users", recipientId, "projectMemberships", projectId),
+      staleData,
+    );
+    staleBatch.set(
+      doc(staleDb, "projects", projectId, "members", recipientId),
+      staleData,
+    );
+    staleBatch.update(doc(staleDb, "projectInvitations", outstanding), {
+      status: "accepted",
+      acceptedBy: recipientId,
+      acceptedAt: serverTimestamp(),
+    });
+    await assertFails(staleBatch.commit());
+    const db = recipientDb();
+    for (const path of [
+      `projects/${projectId}`,
+      `projects/${projectId}/assumptions/a`,
+    ])
+      await assertFails(getDoc(doc(db, path)));
+    await assertFails(
+      getDocs(collection(db, "projects", projectId, "reviews")),
+    );
+    await assertFails(
+      getDocs(
+        collection(db, "projects", projectId, "assumptions", "a", "insights"),
+      ),
+    );
+    await assertFails(
+      updateDoc(doc(db, "projects", projectId, "assumptions", "a"), {
+        statement: "After removal",
+        updatedBy: recipientId,
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    await expect(join()).rejects.toThrow("no longer pending");
+    serviceDb = ownerDb();
+    expect(
+      (
+        await getDocs(
+          collection(serviceDb, "projects", projectId, "memberRemovals"),
+        )
+      ).size,
+    ).toBe(1);
+    expect(
+      (
+        await getDocs(
+          collection(
+            serviceDb,
+            "projects",
+            projectId,
+            "assumptions",
+            "a",
+            "insights",
+          ),
+        )
+      ).docs[0].data().createdBy,
+    ).toBe(recipientId);
+    const fresh = await inviteMember(owner, projectId, recipientEmail);
+    await join(fresh);
+    await assertSucceeds(getDoc(doc(recipientDb(), "projects", projectId)));
+    expect(
+      (
+        await getDocs(
+          collection(ownerDb(), "projects", projectId, "memberRemovals"),
+        )
+      ).size,
+    ).toBe(1);
+  });
+
+  it("forbids member administration and owner removal, and requires matching removal records", async () => {
+    await setupInvite();
+    await join();
+    const db = recipientDb();
+    await assertFails(
+      getDocs(collection(db, "projects", projectId, "members")),
+    );
+    await assertFails(
+      setDoc(
+        doc(db, "projectInvitations", "member-invite"),
+        invitation({ invitedBy: recipientId, inviterEmail: recipientEmail }),
+      ),
+    );
+    await assertFails(
+      updateDoc(
+        doc(db, "users", recipientId, "projectMemberships", projectId),
+        { role: "owner" },
+      ),
+    );
+    await assertFails(
+      updateDoc(
+        doc(ownerDb(), "users", ownerId, "projectMemberships", projectId),
+        { active: false },
+      ),
+    );
+    await assertFails(
+      updateDoc(
+        doc(ownerDb(), "users", recipientId, "projectMemberships", projectId),
+        { active: false },
+      ),
+    );
+    await assertFails(
+      updateDoc(doc(ownerDb(), "projectInvitations", "invite-1"), {
+        recipientEmail: "changed@example.org",
+      }),
+    );
+  });
+
+  it("rejects forged creation metadata, overlong expiration, and unexpected fields", async () => {
+    await seedPrivateProject();
+    const ref = doc(ownerDb(), "projectInvitations", "bad");
+    for (const patch of [
+      { invitedBy: otherUserId },
+      { inviterEmail: "forged@example.org" },
+      { recipientEmail: "UPPER@example.org" },
+      { recipientEmail: "not-email" },
+      { createdAt: Timestamp.fromMillis(1) },
+      { expiresAt: Timestamp.fromMillis(Date.now() + 10 * 86400000) },
+      { status: "accepted" },
+      { projectName: "Leaked metadata" },
+    ]) {
+      await assertFails(setDoc(ref, invitation(patch)));
+    }
+  });
+});
+
+describe("Candidate capture and adoption", () => {
+  const actor = { uid: ownerId, email: "owner@example.com" };
+  beforeEach(async () => {
+    await seedPrivateProject();
+    serviceDb = testEnv
+      .authenticatedContext(ownerId, {
+        email_verified: true,
+        email: actor.email,
+      })
+      .firestore();
+  });
+  const candidateRef = (id) =>
+    doc(serviceDb, "projects", projectId, "candidates", id);
+  const activeRef = (id) =>
+    doc(serviceDb, "projects", projectId, "assumptions", id);
+
+  it("bulk saves candidates separately, edits, adopts unscored, and preserves immutable origin", async () => {
+    const added = await addCandidates(
+      actor,
+      projectId,
+      "Customers will pay.\n\n We can deliver. ",
+    );
+    expect(await loadCandidates(projectId)).toHaveLength(2);
+    expect(await loadAssumptions(projectId)).toHaveLength(0);
+    await editCandidate(
+      actor,
+      projectId,
+      added[0].id,
+      "Customers will pay enough.",
+    );
+    const active = await adoptCandidate(
+      actor,
+      projectId,
+      added[0].id,
+      "Customers will pay enough.",
+    );
+    expect(active.sourceCandidateId).toBe(added[0].id);
+    expect(active.criticality).toBeUndefined();
+    await adoptCandidate(
+      actor,
+      projectId,
+      added[0].id,
+      "Customers will pay enough.",
+    );
+    expect(await loadAssumptions(projectId)).toHaveLength(1);
+    const saved = (await getDoc(candidateRef(added[0].id))).data();
+    expect(saved.createdBy).toBe(ownerId);
+    expect(saved.adoptedBy).toBe(ownerId);
+    expect(saved.createdAt).toBeInstanceOf(Timestamp);
+    expect(saved.adoptedAt).toBeInstanceOf(Timestamp);
+    await assertFails(
+      editCandidate(actor, projectId, added[0].id, "Rewrite history"),
+    );
+    await assertFails(deleteDoc(candidateRef(added[0].id)));
+    await assertFails(
+      updateDoc(activeRef(added[0].id), {
+        sourceCandidateId: "different",
+        updatedBy: ownerId,
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    await assertSucceeds(
+      updateDoc(activeRef(added[0].id), {
+        statement: "Refined active statement.",
+        updatedBy: ownerId,
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    await assertSucceeds(
+      updateAssumptionScores(actor, projectId, added[0].id, {
+        criticality: 80,
+        evidence: 20,
+      }),
+    );
+  });
+
+  it("requires both sides of adoption and rejects forged or cross-project origin", async () => {
+    const [candidate] = await addCandidates(
+      actor,
+      projectId,
+      "We can deliver.",
+    );
+    await assertFails(
+      updateDoc(candidateRef(candidate.id), {
+        status: "adopted",
+        adoptedBy: ownerId,
+        adoptedAt: serverTimestamp(),
+      }),
+    );
+    await assertFails(
+      setDoc(activeRef(candidate.id), {
+        statement: candidate.statement,
+        sourceCandidateId: candidate.id,
+        createdBy: ownerId,
+        createdAt: serverTimestamp(),
+      }),
+    );
+    const batch = writeBatch(serviceDb);
+    batch.update(candidateRef(candidate.id), {
+      status: "adopted",
+      adoptedBy: ownerId,
+      adoptedAt: serverTimestamp(),
+    });
+    batch.set(activeRef(candidate.id), {
+      statement: "Different wording",
+      sourceCandidateId: candidate.id,
+      createdBy: ownerId,
+      createdAt: serverTimestamp(),
+    });
+    await assertFails(batch.commit());
+    expect((await getDoc(candidateRef(candidate.id))).data().status).toBe(
+      "pending",
+    );
+    expect((await getDoc(activeRef(candidate.id))).exists()).toBe(false);
+    await seedPrivateProject("project-b", ownerId);
+    await assertFails(
+      setDoc(
+        doc(serviceDb, "projects", "project-b", "assumptions", candidate.id),
+        {
+          statement: candidate.statement,
+          sourceCandidateId: candidate.id,
+          createdBy: ownerId,
+          createdAt: serverTimestamp(),
+        },
+      ),
+    );
+  });
+
+  it("rejects stale adoption and serializes concurrent adoption to one active record", async () => {
+    const [candidate] = await addCandidates(
+      actor,
+      projectId,
+      "Original wording",
+    );
+    await editCandidate(actor, projectId, candidate.id, "Reviewed wording");
+    await expect(
+      adoptCandidate(actor, projectId, candidate.id, candidate.statement),
+    ).rejects.toThrow(/edited by someone else/);
+    await Promise.all([
+      adoptCandidate(actor, projectId, candidate.id, "Reviewed wording"),
+      adoptCandidate(actor, projectId, candidate.id, "Reviewed wording"),
+    ]);
+    expect(await loadAssumptions(projectId)).toHaveLength(1);
+  });
+
+  it("allows another active member to adopt and denies outsiders, unverified and removed members", async () => {
+    const [candidate] = await addCandidates(
+      actor,
+      projectId,
+      "We can deliver.",
+    );
+    for (const context of [
+      testEnv.unauthenticatedContext(),
+      testEnv.authenticatedContext(otherUserId, { email_verified: true }),
+      testEnv.authenticatedContext(ownerId, { email_verified: false }),
+    ]) {
+      const ref = doc(
+        context.firestore(),
+        "projects",
+        projectId,
+        "candidates",
+        candidate.id,
+      );
+      await assertFails(getDoc(ref));
+      await assertFails(
+        getDocs(
+          collection(context.firestore(), "projects", projectId, "candidates"),
+        ),
+      );
+      await assertFails(
+        updateDoc(ref, {
+          statement: "Intrusion",
+          updatedBy: otherUserId,
+          updatedAt: serverTimestamp(),
+        }),
+      );
+    }
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(
+        doc(
+          context.firestore(),
+          "users",
+          otherUserId,
+          "projectMemberships",
+          projectId,
+        ),
+        membership(projectId, otherUserId, "member"),
+      );
+    });
+    serviceDb = testEnv
+      .authenticatedContext(otherUserId, {
+        email_verified: true,
+        email: "member@example.com",
+      })
+      .firestore();
+    await assertSucceeds(
+      adoptCandidate(
+        { uid: otherUserId, email: "member@example.com" },
+        projectId,
+        candidate.id,
+        candidate.statement,
+      ),
+    );
+    expect((await getDoc(candidateRef(candidate.id))).data().createdBy).toBe(
+      ownerId,
+    );
+    expect((await getDoc(candidateRef(candidate.id))).data().adoptedBy).toBe(
+      otherUserId,
+    );
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(
+        doc(
+          context.firestore(),
+          "users",
+          otherUserId,
+          "projectMemberships",
+          projectId,
+        ),
+        { active: false },
+      );
+    });
+    await assertFails(loadCandidates(projectId));
+    await assertFails(
+      addCandidates(
+        { uid: otherUserId, email: "member@example.com" },
+        projectId,
+        "Another candidate",
+      ),
+    );
+  });
+
+  it("keeps pending candidates out of reviews and retains existing active assumptions", async () => {
+    await setDoc(activeRef("existing"), {
+      statement: "Existing active assumption",
+      createdBy: ownerId,
+      createdAt: serverTimestamp(),
+      criticality: 90,
+      evidence: 25,
+    });
+    const [candidate] = await addCandidates(actor, projectId, "New candidate");
+    const before = await captureReview(projectId);
+    expect(before.snapshot.assumptions.map((item) => item.id)).toEqual([
+      "existing",
+    ]);
+    await adoptCandidate(actor, projectId, candidate.id, candidate.statement);
+    const after = await captureReview(projectId);
+    expect(after.snapshot.assumptions).toHaveLength(2);
+    expect(
+      after.snapshot.assumptions.find((item) => item.id === "existing")
+        .criticality,
+    ).toBe(90);
+    expect(
+      after.snapshot.assumptions.find((item) => item.id === candidate.id)
+        .criticality,
+    ).toBeNull();
+    expect(before.snapshot.assumptions).toHaveLength(1);
+  });
+
+  it("validates creation metadata and supports the 20-candidate batch limit", async () => {
+    for (const patch of [
+      { statement: " " },
+      { statement: "a".repeat(2001) },
+      { createdBy: otherUserId },
+      { authorEmail: "fake@example.com" },
+      { createdAt: Timestamp.fromMillis(1) },
+      { status: "adopted" },
+      { criticality: 99 },
+    ]) {
+      await assertFails(
+        setDoc(candidateRef("invalid"), {
+          statement: "Valid statement",
+          status: "pending",
+          createdBy: ownerId,
+          authorEmail: actor.email,
+          createdAt: serverTimestamp(),
+          ...patch,
+        }),
+      );
+    }
+    await assertSucceeds(
+      addCandidates(
+        actor,
+        projectId,
+        Array.from({ length: 20 }, (_, i) => `Candidate ${i}`).join("\n"),
+      ),
+    );
+    expect(await loadCandidates(projectId)).toHaveLength(20);
   });
 });

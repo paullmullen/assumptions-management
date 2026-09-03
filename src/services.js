@@ -1,6 +1,8 @@
+import { parseCandidates } from "./features/candidates/candidateValues.js";
 import { normalizeInsight } from "./features/assumptions/insightValues.js";
 import {
   addDoc,
+  onSnapshot,
   collection,
   doc,
   getDoc,
@@ -290,4 +292,150 @@ export async function addInsight(user, projectId, assumptionId, values) {
   );
   // Do not turn a successful write into a failed save if a follow-up read fails.
   return { ...record, id: reference.id, createdAt: null };
+}
+
+// Membership changes update project navigation and close a removed project.
+export function watchProjects(user, onChange, onError) {
+  let active = true;
+  let revision = 0;
+  const unsubscribe = onSnapshot(
+    collection(db, "users", user.uid, "projectMemberships"),
+    async () => {
+      const current = ++revision;
+      try {
+        const projects = await loadProjects(user);
+        if (active && current === revision) onChange(projects);
+      } catch (error) {
+        if (active && current === revision) onError(error);
+      }
+    },
+    (error) => {
+      if (active) onError(error);
+    },
+  );
+  return () => {
+    active = false;
+    revision += 1;
+    unsubscribe();
+  };
+}
+
+export async function loadCandidates(projectId) {
+  const snapshot = await getDocs(
+    collection(db, "projects", projectId, "candidates"),
+  );
+  return snapshot.docs
+    .map((item) => ({ ...item.data(), id: item.id }))
+    .sort(
+      (a, b) =>
+        (a.createdAt?.toMillis() ?? 0) - (b.createdAt?.toMillis() ?? 0) ||
+        a.id.localeCompare(b.id),
+    );
+}
+
+export async function addCandidates(user, projectId, text) {
+  const statements = parseCandidates(text);
+  const batch = writeBatch(db);
+  const records = statements.map((statement) => {
+    const ref = doc(collection(db, "projects", projectId, "candidates"));
+    const record = {
+      statement,
+      status: "pending",
+      createdBy: user.uid,
+      authorEmail: user.email,
+      createdAt: serverTimestamp(),
+    };
+    batch.set(ref, record);
+    return { ...record, id: ref.id, createdAt: null };
+  });
+  await batch.commit();
+  return records;
+}
+
+export async function editCandidate(user, projectId, candidateId, statement) {
+  const trimmed = statement.trim();
+  if (!trimmed || trimmed.length > 2000)
+    throw new Error("Enter a candidate of 1–2,000 characters.");
+  await updateDoc(doc(db, "projects", projectId, "candidates", candidateId), {
+    statement: trimmed,
+    updatedBy: user.uid,
+    updatedAt: serverTimestamp(),
+  });
+  return trimmed;
+}
+
+export async function adoptCandidate(
+  user,
+  projectId,
+  candidateId,
+  expectedStatement,
+) {
+  const candidateRef = doc(
+    db,
+    "projects",
+    projectId,
+    "candidates",
+    candidateId,
+  );
+  const assumptionRef = doc(
+    db,
+    "projects",
+    projectId,
+    "assumptions",
+    candidateId,
+  );
+  const attempt = () =>
+    runTransaction(db, async (transaction) => {
+      const candidate = await transaction.get(candidateRef);
+      const assumption = await transaction.get(assumptionRef);
+      if (!candidate.exists())
+        throw new Error("This candidate is unavailable.");
+      const record = candidate.data();
+      if (
+        record.status === "adopted" &&
+        assumption.exists() &&
+        assumption.data().sourceCandidateId === candidateId
+      )
+        return { ...assumption.data(), id: assumption.id };
+      if (record.status !== "pending" || assumption.exists())
+        throw new Error(
+          "This candidate cannot be adopted. Refresh the candidates.",
+        );
+      if (record.statement !== expectedStatement)
+        throw new Error(
+          "This candidate was edited by someone else. Refresh and review it before adopting.",
+        );
+      const active = {
+        statement: record.statement,
+        sourceCandidateId: candidateId,
+        createdBy: user.uid,
+        createdAt: serverTimestamp(),
+      };
+      transaction.set(assumptionRef, active);
+      transaction.update(candidateRef, {
+        status: "adopted",
+        adoptedBy: user.uid,
+        adoptedAt: serverTimestamp(),
+      });
+      return { ...active, id: candidateId, createdAt: null };
+    });
+  try {
+    return await attempt();
+  } catch (error) {
+    // Rules can reject a competing commit before the SDK retries its transaction.
+    // Confirm another adoption actually completed; never retry a denied write.
+    if (error.code !== "permission-denied") throw error;
+    const [candidate, assumption] = await Promise.all([
+      getDoc(candidateRef),
+      getDoc(assumptionRef),
+    ]);
+    if (
+      candidate.exists() &&
+      candidate.data().status === "adopted" &&
+      assumption.exists() &&
+      assumption.data().sourceCandidateId === candidateId
+    )
+      return { ...assumption.data(), id: assumption.id };
+    throw error;
+  }
 }

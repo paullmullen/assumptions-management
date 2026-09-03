@@ -18,6 +18,76 @@ service cloud.firestore {
         && get(membershipPath(projectId)).data.active == true;
     }
 
+    function isProjectOwner(projectId) {
+      return isActiveMember(projectId) && get(membershipPath(projectId)).data.role == 'owner';
+    }
+
+    function acceptsInvitation(data, projectId, userId) {
+      let invitationPath = /databases/$(database)/documents/projectInvitations/$(data.invitationId);
+      let before = get(invitationPath).data;
+      let after = getAfter(invitationPath).data;
+      return isVerifiedUser() && request.auth.uid == userId
+        && data.keys().hasOnly(['projectId', 'userId', 'role', 'active', 'createdAt', 'invitationId', 'email'])
+        && data.projectId == projectId && data.userId == userId
+        && data.role == 'member' && data.active == true && data.createdAt == request.time
+        && data.email == request.auth.token.email.lower()
+        && before.projectId == projectId && before.recipientEmail == data.email
+        && before.status == 'pending' && before.expiresAt > request.time
+        && (!exists(/databases/$(database)/documents/users/$(userId)/projectMemberships/$(projectId))
+          || get(/databases/$(database)/documents/users/$(userId)/projectMemberships/$(projectId)).data.active == true
+          || before.createdAt > get(/databases/$(database)/documents/users/$(userId)/projectMemberships/$(projectId)).data.removedAt)
+        && after.status == 'accepted' && after.acceptedBy == userId && after.acceptedAt == request.time;
+    }
+
+    function validRemoval(before, after, projectId, userId) {
+      let eventPath = /databases/$(database)/documents/projects/$(projectId)/memberRemovals/$(after.lastRemovalId);
+      return isProjectOwner(projectId)
+        && before.role == 'member' && before.active == true && after.active == false
+        && after.diff(before).affectedKeys().hasOnly(['active', 'removedAt', 'removedBy', 'lastRemovalId'])
+        && after.removedAt == request.time && after.removedBy == request.auth.uid
+        && !exists(eventPath)
+        && getAfter(eventPath).data == {'memberId': userId, 'removedBy': request.auth.uid, 'removedAt': request.time};
+    }
+
+    match /projectInvitations/{invitationId} {
+      function recipient(data) {
+        return isVerifiedUser() && data.recipientEmail == request.auth.token.email.lower();
+      }
+      function validAcceptance() {
+        let data = resource.data;
+        let member = getAfter(/databases/$(database)/documents/users/$(request.auth.uid)/projectMemberships/$(data.projectId)).data;
+        return recipient(data) && data.expiresAt > request.time
+          && request.resource.data.status == 'accepted'
+          && request.resource.data.acceptedBy == request.auth.uid
+          && request.resource.data.acceptedAt == request.time
+          && request.resource.data.diff(data).affectedKeys().hasOnly(['status', 'acceptedBy', 'acceptedAt'])
+          && member.active == true && member.userId == request.auth.uid && member.projectId == data.projectId;
+      }
+      allow get: if isProjectOwner(resource.data.projectId) || recipient(resource.data);
+      allow list: if isProjectOwner(resource.data.projectId);
+      allow create: if isProjectOwner(request.resource.data.projectId)
+        && request.resource.data.keys().hasOnly(['projectId', 'recipientEmail', 'invitedBy', 'inviterEmail', 'createdAt', 'expiresAt', 'status'])
+        && request.resource.data.keys().hasAll(['projectId', 'recipientEmail', 'invitedBy', 'inviterEmail', 'createdAt', 'expiresAt', 'status'])
+        && request.resource.data.recipientEmail is string
+        && request.resource.data.recipientEmail.size() <= 254
+        && request.resource.data.recipientEmail == request.resource.data.recipientEmail.lower()
+        && request.resource.data.recipientEmail.matches('[^\\s@]+@[^\\s@]+[.][^\\s@]+')
+        && request.resource.data.invitedBy == request.auth.uid
+        && request.resource.data.inviterEmail == request.auth.token.email
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.expiresAt is timestamp
+        && request.resource.data.expiresAt > request.time
+        && request.resource.data.expiresAt <= request.time + duration.value(8, 'd')
+        && request.resource.data.status == 'pending';
+      allow update: if resource.data.status == 'pending' && (
+        (isProjectOwner(resource.data.projectId)
+          && request.resource.data.status == 'revoked'
+          && request.resource.data.revokedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'revokedAt']))
+        || validAcceptance());
+      allow delete: if false;
+    }
+
     function hasProjectFields(data) {
       return data.keys().hasOnly(['name', 'description', 'creatorId', 'createdAt'])
         && data.keys().hasAll(['name', 'creatorId', 'createdAt'])
@@ -49,14 +119,21 @@ service cloud.firestore {
       allow update, delete: if false;
 
       match /projectMemberships/{projectId} {
-        allow read: if isVerifiedUser() && request.auth.uid == userId;
+        allow get: if isVerifiedUser() && (request.auth.uid == userId || isProjectOwner(projectId));
+        allow list: if isVerifiedUser() && request.auth.uid == userId;
         allow create: if isVerifiedUser()
           && request.auth.uid == userId
           && !exists(/databases/$(database)/documents/projects/$(projectId))
           && existsAfter(/databases/$(database)/documents/projects/$(projectId))
           && hasInitialMembershipFields(request.resource.data, projectId, userId)
           && getAfter(/databases/$(database)/documents/projects/$(projectId)).data.creatorId == request.auth.uid;
-        allow update, delete: if false;
+        allow create: if acceptsInvitation(request.resource.data, projectId, userId)
+          && getAfter(/databases/$(database)/documents/projects/$(projectId)/members/$(userId)).data == request.resource.data;
+        allow update: if (
+          (resource.data.active == false && acceptsInvitation(request.resource.data, projectId, userId))
+          || validRemoval(resource.data, request.resource.data, projectId, userId))
+          && getAfter(/databases/$(database)/documents/projects/$(projectId)/members/$(userId)).data == request.resource.data;
+        allow delete: if false;
       }
     }
 
@@ -85,6 +162,56 @@ service cloud.firestore {
         );
       allow read: if isActiveMember(projectId);
       allow update, delete: if false;
+
+      match /members/{userId} {
+        allow read: if isProjectOwner(projectId);
+        allow create: if acceptsInvitation(request.resource.data, projectId, userId)
+          && getAfter(/databases/$(database)/documents/users/$(userId)/projectMemberships/$(projectId)).data == request.resource.data;
+        allow update: if (
+          (resource.data.active == false && acceptsInvitation(request.resource.data, projectId, userId))
+          || validRemoval(resource.data, request.resource.data, projectId, userId))
+          && getAfter(/databases/$(database)/documents/users/$(userId)/projectMemberships/$(projectId)).data == request.resource.data;
+        allow delete: if false;
+      }
+      match /memberRemovals/{removalId} {
+        allow read: if isProjectOwner(projectId);
+        allow create: if isProjectOwner(projectId)
+          && request.resource.data.keys().hasOnly(['memberId', 'removedBy', 'removedAt'])
+          && request.resource.data.removedBy == request.auth.uid
+          && request.resource.data.removedAt == request.time
+          && get(/databases/$(database)/documents/users/$(request.resource.data.memberId)/projectMemberships/$(projectId)).data.active == true
+          && getAfter(/databases/$(database)/documents/users/$(request.resource.data.memberId)/projectMemberships/$(projectId)).data.active == false
+          && getAfter(/databases/$(database)/documents/users/$(request.resource.data.memberId)/projectMemberships/$(projectId)).data.lastRemovalId == removalId;
+        allow update, delete: if false;
+      }
+
+      match /reviews/{reviewId} {
+        allow read: if isActiveMember(projectId);
+        allow create: if isActiveMember(projectId)
+          && request.resource.data.keys().hasOnly(['schemaVersion', 'title', 'notes', 'previousReviewId', 'capturedAt', 'assumptions', 'promises', 'publishedBy', 'publisherEmail', 'publishedAt'])
+          && request.resource.data.keys().hasAll(['schemaVersion', 'title', 'notes', 'previousReviewId', 'capturedAt', 'assumptions', 'promises', 'publishedBy', 'publisherEmail', 'publishedAt'])
+          && request.resource.data.schemaVersion == 1
+          && request.resource.data.title is string
+          && request.resource.data.title.matches('[\\s\\S]*[^\\s][\\s\\S]*')
+          && request.resource.data.title.size() <= 120
+          && request.resource.data.notes is string
+          && request.resource.data.notes.size() <= 4000
+          && request.resource.data.capturedAt is int
+          && request.resource.data.capturedAt > 0
+          && request.resource.data.assumptions is list
+          && request.resource.data.promises is map
+          && request.resource.data.promises.keys().hasOnly(['customerPromise', 'investorPromise', 'coworkerPromise'])
+          && request.resource.data.promises.customerPromise is string
+          && request.resource.data.promises.investorPromise is string
+          && request.resource.data.promises.coworkerPromise is string
+          && request.resource.data.publishedBy == request.auth.uid
+          && request.resource.data.publisherEmail == request.auth.token.email
+          && request.resource.data.publishedAt == request.time
+          && (request.resource.data.previousReviewId == null
+            || (request.resource.data.previousReviewId is string
+              && exists(/databases/$(database)/documents/projects/$(projectId)/reviews/$(request.resource.data.previousReviewId))));
+        allow update, delete: if false;
+      }
 
       match /projectBrief/{briefId} {
         allow read: if isActiveMember(projectId);
@@ -115,7 +242,52 @@ service cloud.firestore {
         allow delete: if false;
       }
 
+match /candidates/{candidateId} {
+  function validCandidate(data) {
+    return data.statement is string && data.statement.matches('[\\s\\S]*[^\\s][\\s\\S]*')
+      && data.statement.size() <= 2000;
+  }
+  function matchingAdoption() {
+    let path = /databases/$(database)/documents/projects/$(projectId)/assumptions/$(candidateId);
+    let active = getAfter(path).data;
+    return !exists(path) && active.sourceCandidateId == candidateId
+      && active.statement == resource.data.statement
+      && active.createdBy == request.auth.uid && active.createdAt == request.time;
+  }
+  allow read: if isActiveMember(projectId);
+  allow create: if isActiveMember(projectId)
+    && request.resource.data.keys().hasOnly(['statement', 'status', 'createdBy', 'authorEmail', 'createdAt'])
+    && validCandidate(request.resource.data)
+    && request.resource.data.status == 'pending'
+    && request.resource.data.createdBy == request.auth.uid
+    && request.resource.data.authorEmail == request.auth.token.email
+    && request.resource.data.createdAt == request.time;
+  allow update: if isActiveMember(projectId) && resource.data.status == 'pending'
+    && ((request.resource.data.diff(resource.data).affectedKeys().hasOnly(['statement', 'updatedBy', 'updatedAt'])
+      && validCandidate(request.resource.data)
+      && request.resource.data.updatedBy == request.auth.uid
+      && request.resource.data.updatedAt == request.time)
+    || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'adoptedBy', 'adoptedAt'])
+      && request.resource.data.status == 'adopted'
+      && request.resource.data.adoptedBy == request.auth.uid
+      && request.resource.data.adoptedAt == request.time
+      && matchingAdoption()));
+  allow delete: if false;
+}
+
 match /assumptions/{assumptionId} {
+  function validCandidateOrigin() {
+    let path = /databases/$(database)/documents/projects/$(projectId)/candidates/$(assumptionId);
+    let before = get(path).data;
+    let after = getAfter(path).data;
+    return request.resource.data.sourceCandidateId == assumptionId
+      && before.status == 'pending' && after.status == 'adopted'
+      && after.adoptedBy == request.auth.uid && after.adoptedAt == request.time
+      && request.resource.data.statement == before.statement
+      && request.resource.data.createdAt == request.time
+      && !('criticality' in request.resource.data) && !('evidence' in request.resource.data);
+  }
+
   function scorePair(data) {
     return { 'criticality': data.get('criticality', null), 'evidence': data.get('evidence', null) };
   }
@@ -208,6 +380,7 @@ match /assumptions/{assumptionId} {
 
   allow create: if isActiveMember(projectId)
     && request.resource.data.keys().hasOnly([
+      'sourceCandidateId',
       'statement',
       'criticality',
       'evidence',
@@ -224,10 +397,12 @@ match /assumptions/{assumptionId} {
     && request.resource.data.statement.size() <= 2000
     && hasValidAssumptionScores(request.resource.data)
     && request.resource.data.createdBy == request.auth.uid
-    && request.resource.data.createdAt is timestamp;
+    && request.resource.data.createdAt is timestamp
+    && (!('sourceCandidateId' in request.resource.data) || validCandidateOrigin());
 
   allow update: if isActiveMember(projectId)
     && request.resource.data.keys().hasOnly([
+      'sourceCandidateId',
       'statement',
       'criticality',
       'evidence',

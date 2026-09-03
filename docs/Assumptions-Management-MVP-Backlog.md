@@ -1,6 +1,22 @@
+# Current implementation refinement — Candidate capture and adoption
+
+Members can now capture candidate assumptions individually or through multiline paste, edit pending wording, and explicitly adopt into the active portfolio. Adoption is atomic, unscored, retry-safe, and preserves the original candidate and author plus adoption metadata. Candidates stay out of review captures until adopted. Soft wording and portfolio-size guidance are included. See [Candidate capture and adoption](Candidate-Capture-and-Adoption.md). Merge/split, discard/entered-in-error, and detailed candidate edit history remain outstanding; this does not complete the entire candidate lifecycle.
+
+# Current implementation refinement — Optional guided start
+
+An optional, reopenable guided start now explains promises, affirmative assumptions, blind spots, assessment, and learning/reviews. It navigates to the existing editors without duplicate forms or required steps. Progress is remembered per account/project on the same browser; it is not synchronized across devices. See [Guided start](Guided-Start.md) and the [MVP status audit](MVP-Status.md). This completes a bounded guidance slice, not the candidate workshop or the full MVP.
+
+# Current implementation refinement — Invitations and shared access
+
+Owners can now create email-addressed invitation links, inspect accepted members, revoke invitations, and remove member access. Only the intended verified account can accept a pending unexpired invitation. Server-enforced Firestore rules protect atomic acceptance/removal and immutable event history. See [Project collaboration](Project-Collaboration.md). This bounded slice uses existing Firebase dependencies and does not send invitation emails automatically. Multiple owners/ownership transfer, candidate lifecycle, notifications, and final pilot acceptance remain outstanding.
+
+# Current implementation refinement — Formal reviews
+
+Basic formal reviews now capture the saved portfolio and Three Promises, compare against the previous published review, accept notes, and publish a member-attributed immutable snapshot. New insights, scores, wording, next step, and help needed are inspectable. See [Formal reviews](Formal-Reviews.md) for acceptance checks and the snapshot consistency/security boundaries. Merge/split lineage awaits the candidate lifecycle. Automatic invitation emails, ownership transfer, candidate lifecycle, notifications, and final pilot acceptance remain outstanding; this delivery does not mark the whole MVP complete.
+
 # Current implementation refinement — Management record
 
-Next step and Help needed are now optional current fields in the single assumption editor. Changes save independently or with scores/insights and retain immutable previous/new values, author, and timestamp. Responsible person and target date remain deferred. See [Next step and help needed](Next-Step-and-Help-Needed.md). Formal reviews are the next planned core slice; other unimplemented backlog items remain outstanding.
+Next step and Help needed are now optional current fields in the single assumption editor. Changes save independently or with scores/insights and retain immutable previous/new values, author, and timestamp. Responsible person and target date remain deferred. See [Next step and help needed](Next-Step-and-Help-Needed.md). Basic formal reviews are now implemented; other unimplemented backlog items remain outstanding.
 
 # Current implementation refinement — New Insights
 

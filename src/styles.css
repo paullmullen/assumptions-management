@@ -255,3 +255,19 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+.guided-start {
+  margin-bottom: 24px;
+}
+section[id^="project-"] {
+  scroll-margin-top: 24px;
+}
+
+.candidate-panel,
+.portfolio-size-guidance {
+  grid-column: 1 / -1;
+}
+.candidate-row {
+  padding: 16px 0;
+  border-top: 1px solid #d9e2de;
+}

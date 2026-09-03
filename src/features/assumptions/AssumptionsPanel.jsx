@@ -20,6 +20,7 @@ import {
 } from "../../services.js";
 import PortfolioChart from "../portfolioChart/PortfolioChart.jsx";
 
+import CandidatesPanel from "../candidates/CandidatesPanel.jsx";
 import InsightsPanel from "./InsightsPanel.jsx";
 
 const { Paragraph, Text } = Typography;
@@ -185,6 +186,23 @@ function ProjectAssumptions({ projectId, user }) {
 
   return (
     <div className="two-column">
+      <CandidatesPanel
+        projectId={projectId}
+        user={user}
+        onAdopt={(active) => {
+          setAssumptions((current) => [
+            ...current.filter((item) => item.id !== active.id),
+            active,
+          ]);
+          setSelectedId(active.id);
+        }}
+      />
+      {assumptions.length > 12 && (
+        <Paragraph className="portfolio-size-guidance">
+          There are {assumptions.length} active assumptions. About 12 often
+          keeps a portfolio manageable; keep more when they are useful.
+        </Paragraph>
+      )}
       <Card title="Add a basic assumption">
         <Paragraph>
           State what is true—or must become true—for this project to deliver its
@@ -281,6 +299,9 @@ function ProjectAssumptions({ projectId, user }) {
                       </Paragraph>
 
                       <Space wrap>
+                        {assumption.sourceCandidateId && (
+                          <Tag>Adopted candidate</Tag>
+                        )}
                         {isAssessed ? (
                           <>
                             <Tag
