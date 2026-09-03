@@ -64,18 +64,11 @@ describe("portfolio chart", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Assumption 1:/ }));
 
-    expect(screen.getByText("Selected assumption")).toBeInTheDocument();
-    expect(container.querySelector(".portfolio-selection")).toHaveTextContent(
-      "Customers will adopt the new workflow.",
-    );
     expect(
-      screen.getByRole("spinbutton", { name: "Criticality if wrong" }),
-    ).toHaveValue("82");
-    expect(
-      screen.getByRole("spinbutton", {
-        name: "Strength of supporting evidence",
-      }),
-    ).toHaveValue("18");
+      screen.getByRole("button", { name: /Assumption 1:/ }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(container.querySelector(".portfolio-selection")).toBeNull();
+    expect(screen.queryByRole("spinbutton")).not.toBeInTheDocument();
   });
 
   it("teaches the next action when nothing has been assessed", () => {

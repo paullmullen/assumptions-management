@@ -5,6 +5,13 @@ const state = vi.hoisted(() => ({
   changeProjects: null,
   user: { uid: "member", email: "member@example.org", emailVerified: true },
 }));
+vi.mock("./features/reviews/reviewPreference.js", () => ({
+  watchReviewPreference: vi.fn((_id, callback) => {
+    callback(true);
+    return () => {};
+  }),
+  saveReviewPreference: vi.fn(),
+}));
 vi.mock("./firebase.js", () => ({
   auth: { currentUser: state.user },
   isFirebaseConfigured: true,

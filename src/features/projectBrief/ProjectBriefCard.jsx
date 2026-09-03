@@ -8,19 +8,29 @@ import {
   Spin,
   Typography,
 } from "antd";
+import { useDraft } from "../workspace/draftContext.js";
 import { loadProjectBrief, saveProjectBrief } from "../../services.js";
 
 const { Paragraph } = Typography;
 
-export default function ProjectBriefCard({ projectId, userId }) {
-  return <ProjectBrief key={projectId} projectId={projectId} userId={userId} />;
+export default function ProjectBriefCard({ projectId, userId, onIncomplete }) {
+  return (
+    <ProjectBrief
+      key={projectId}
+      projectId={projectId}
+      userId={userId}
+      onIncomplete={onIncomplete}
+    />
+  );
 }
 
-function ProjectBrief({ projectId, userId }) {
+function ProjectBrief({ projectId, userId, onIncomplete }) {
   const { message } = AntApp.useApp();
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [form] = Form.useForm();
+  const [saved, setSaved] = useState({});
+  const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -29,6 +39,12 @@ function ProjectBrief({ projectId, userId }) {
       .then((brief) => {
         if (active) {
           form.setFieldsValue(brief);
+          setSaved(brief);
+          onIncomplete?.(
+            ["customerPromise", "investorPromise", "coworkerPromise"].some(
+              (key) => !brief[key]?.trim(),
+            ),
+          );
         }
       })
       .catch(() => {
@@ -45,22 +61,40 @@ function ProjectBrief({ projectId, userId }) {
     return () => {
       active = false;
     };
-  }, [form, message, projectId]);
+  }, [form, message, projectId, onIncomplete]);
 
   async function submit(values) {
-    if (loading || busy) return;
+    if (loading || busy) return false;
     setBusy(true);
 
     try {
       await saveProjectBrief(projectId, userId, values);
+      setSaved(values);
+      setDirty(false);
+      onIncomplete?.(
+        ["customerPromise", "investorPromise", "coworkerPromise"].some(
+          (key) => !values[key]?.trim(),
+        ),
+      );
       message.success("Project promises saved.");
+      return true;
     } catch {
       message.error("The project promises could not be saved.");
+      return false;
     } finally {
       setBusy(false);
     }
   }
 
+  useDraft("Three Promises", {
+    dirty,
+    busy,
+    save: async () => submit(await form.validateFields()),
+    discard: () => {
+      form.setFieldsValue(saved);
+      setDirty(false);
+    },
+  });
   return (
     <Card style={{ marginBottom: 24 }} title="The three promises">
       <Spin spinning={loading}>
@@ -75,6 +109,13 @@ function ProjectBrief({ projectId, userId }) {
           disabled={loading || busy}
           layout="vertical"
           onFinish={submit}
+          onValuesChange={(_, values) =>
+            setDirty(
+              Object.keys(values).some(
+                (key) => (values[key] ?? "") !== (saved[key] ?? ""),
+              ),
+            )
+          }
           requiredMark={false}
         >
           <Form.Item

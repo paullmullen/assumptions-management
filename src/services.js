@@ -1,3 +1,8 @@
+import {
+  assumptionFields,
+  editableAssumption,
+  prepareAssumptionDraft,
+} from "./features/assumptions/assumptionDraft.js";
 import { parseCandidates } from "./features/candidates/candidateValues.js";
 import { normalizeInsight } from "./features/assumptions/insightValues.js";
 import {
@@ -6,6 +11,7 @@ import {
   collection,
   doc,
   getDoc,
+  getDocFromServer,
   getDocs,
   serverTimestamp,
   runTransaction,
@@ -187,7 +193,7 @@ export async function ensureUserProfile(user) {
 
 export async function createProject(user, values) {
   const name = values.name.trim();
-  const description = values.description.trim();
+  const description = (values.description ?? "").trim();
   const projectRef = doc(collection(db, "projects"));
   const membershipRef = doc(
     db,
@@ -197,7 +203,12 @@ export async function createProject(user, values) {
     projectRef.id,
   );
   const batch = writeBatch(db);
-  const project = { name, creatorId: user.uid, createdAt: serverTimestamp() };
+  const project = {
+    name,
+    creatorId: user.uid,
+    createdAt: serverTimestamp(),
+    formalReviewsEnabled: values.formalReviewsEnabled === true,
+  };
 
   if (description) {
     project.description = description;
@@ -436,6 +447,163 @@ export async function adoptCandidate(
       assumption.data().sourceCandidateId === candidateId
     )
       return { ...assumption.data(), id: assumption.id };
+    throw error;
+  }
+}
+
+// One atomic save for the workspace drawer. Legacy service entry points remain
+// available; current drawer writes always include the baseline the user edited.
+export async function saveAssumptionDraft(
+  user,
+  projectId,
+  assumptionId,
+  baseline,
+  draft,
+  insight,
+) {
+  const { saved, values, changes, scoresChanged, entry } =
+    prepareAssumptionDraft(baseline, draft, insight);
+  const creating = baseline === null;
+  const reference = doc(db, "projects", projectId, "assumptions", assumptionId);
+  const insightRef = doc(collection(reference, "insights"));
+  function assertBaseline(current) {
+    if (!current) return;
+    const before = editableAssumption(current);
+    // Wording is context for every save, including insight-only saves. Both
+    // scores are checked together whenever the score pair is being edited.
+    const checked = new Set([
+      "statement",
+      ...Object.keys(changes),
+      ...(scoresChanged ? ["criticality", "evidence"] : []),
+    ]);
+    const conflicts =
+      current && [...checked].filter((key) => before[key] !== saved[key]);
+    if ((creating && current) || (!creating && conflicts.length)) {
+      const error = new Error(
+        "This assumption changed while you were editing. Review the saved values before trying again.",
+      );
+      error.code = "assumption-conflict";
+      error.current = { ...current, id: assumptionId };
+      error.fields = creating ? Object.keys(assumptionFields) : conflicts;
+      throw error;
+    }
+  }
+  const commit = () =>
+    runTransaction(db, async (transaction) => {
+      const snapshot = await transaction.get(reference);
+      const current = snapshot.exists() ? snapshot.data() : null;
+      if (!creating && !current)
+        throw new Error("This assumption is unavailable.");
+      assertBaseline(current);
+      const before = editableAssumption(current ?? {});
+      const after = { ...before, ...changes };
+      const scoreChange =
+        scoresChanged &&
+        (before.criticality !== after.criticality ||
+          before.evidence !== after.evidence);
+      const managementChange =
+        before.nextStep !== after.nextStep ||
+        before.helpNeeded !== after.helpNeeded;
+      const record =
+        entry || scoreChange || managementChange
+          ? {
+              ...(entry ?? {}),
+              ...(scoreChange
+                ? {
+                    scoreChange: {
+                      from: {
+                        criticality: before.criticality,
+                        evidence: before.evidence,
+                      },
+                      to: {
+                        criticality: after.criticality,
+                        evidence: after.evidence,
+                      },
+                    },
+                  }
+                : {}),
+              ...(managementChange
+                ? {
+                    managementChange: {
+                      from: {
+                        nextStep: before.nextStep,
+                        helpNeeded: before.helpNeeded,
+                      },
+                      to: {
+                        nextStep: after.nextStep,
+                        helpNeeded: after.helpNeeded,
+                      },
+                    },
+                  }
+                : {}),
+              createdBy: user.uid,
+              authorEmail: user.email,
+              createdAt: serverTimestamp(),
+            }
+          : null;
+      const pointers = {
+        ...(scoreChange ? { lastScoreChangeId: insightRef.id } : {}),
+        ...(managementChange ? { lastManagementChangeId: insightRef.id } : {}),
+      };
+      let result;
+      if (creating) {
+        const data = {
+          statement: values.statement,
+          ...(scoresChanged
+            ? { criticality: values.criticality, evidence: values.evidence }
+            : {}),
+          ...(values.nextStep ? { nextStep: values.nextStep } : {}),
+          ...(values.helpNeeded ? { helpNeeded: values.helpNeeded } : {}),
+          createdBy: user.uid,
+          createdAt: serverTimestamp(),
+          ...(record
+            ? { updatedBy: user.uid, updatedAt: serverTimestamp(), ...pointers }
+            : {}),
+        };
+        transaction.set(reference, data);
+        result = {
+          ...data,
+          createdAt: null,
+          ...(record ? { updatedAt: null } : {}),
+        };
+      } else {
+        const update = Object.keys(changes).length
+          ? {
+              ...changes,
+              ...pointers,
+              updatedBy: user.uid,
+              updatedAt: serverTimestamp(),
+            }
+          : null;
+        if (update) transaction.update(reference, update);
+        result = {
+          ...current,
+          ...update,
+          ...(update ? { updatedAt: null } : {}),
+        };
+      }
+      if (record) transaction.set(insightRef, record);
+      return {
+        assumption: { ...result, id: assumptionId },
+        insight: record
+          ? { ...record, id: insightRef.id, createdAt: null }
+          : null,
+      };
+    });
+  try {
+    return await commit();
+  } catch (error) {
+    if (error.code !== "permission-denied") throw error;
+    // Matching-history rules may reject a racing commit before the SDK retries
+    // its transaction. Read current authorized state to identify that conflict;
+    // never retry a denied write or relax the history checks.
+    let latest;
+    try {
+      latest = await getDocFromServer(reference);
+    } catch {
+      throw error;
+    }
+    if (latest.exists()) assertBaseline(latest.data());
     throw error;
   }
 }

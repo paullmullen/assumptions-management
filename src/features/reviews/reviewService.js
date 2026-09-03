@@ -2,6 +2,7 @@ import {
   collection,
   doc,
   getDocs,
+  getDocFromServer,
   runTransaction,
   serverTimestamp,
 } from "firebase/firestore";
@@ -27,6 +28,9 @@ export async function loadReviews(projectId) {
 }
 
 export async function captureReview(projectId) {
+  const project = await getDocFromServer(doc(db, "projects", projectId));
+  if (!project.exists() || project.data().formalReviewsEnabled === false)
+    throw new Error("Formal reviews are turned off for this project.");
   const [assumptions, promises, reviews] = await Promise.all([
     loadAssumptions(projectId),
     loadProjectBrief(projectId),
@@ -103,6 +107,11 @@ export async function publishReview(user, projectId, reviewId, values) {
         );
       return;
     }
+    const project = await transaction.get(doc(db, "projects", projectId));
+    if (!project.exists() || project.data().formalReviewsEnabled === false)
+      throw new Error(
+        "Formal reviews are turned off. Your draft is retained; ask the owner to enable reviews before publishing.",
+      );
     transaction.set(reference, {
       ...values,
       title: values.title.trim(),

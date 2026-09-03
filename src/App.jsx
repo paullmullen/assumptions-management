@@ -4,6 +4,7 @@ import {
   Alert,
   Button,
   Card,
+  Checkbox,
   Empty,
   Form,
   Input,
@@ -22,7 +23,10 @@ import {
   signInWithEmailAndPassword,
   signOut,
 } from "firebase/auth";
-import MembersPanel from "./features/members/MembersPanel.jsx";
+import ProjectWorkspace from "./features/workspace/ProjectWorkspace.jsx";
+import DraftProvider from "./features/workspace/DraftProvider.jsx";
+import useProjectNavigation from "./features/workspace/useProjectNavigation.js";
+import { useNavigationGuard } from "./features/workspace/draftContext.js";
 import InvitationScreen from "./features/members/InvitationScreen.jsx";
 import ReviewsPanel from "./features/reviews/ReviewsPanel.jsx";
 import ProjectBriefCard from "./features/projectBrief/ProjectBriefCard.jsx";
@@ -43,11 +47,6 @@ import {
 
 const { Header, Content } = Layout;
 const { Title, Text, Paragraph } = Typography;
-
-function routeTo(path) {
-  window.history.pushState({}, "", path);
-  window.dispatchEvent(new PopStateEvent("popstate"));
-}
 
 function AuthScreen() {
   const [mode, setMode] = useState("sign-in");
@@ -193,16 +192,10 @@ function VerificationScreen({ user }) {
 }
 
 function ProjectHeader({ projects, projectId, onSelect, onCreate, onSignOut }) {
-  const activeProject = projects.find((project) => project.id === projectId);
   return (
     <Header className="app-header">
       <Space className="header-content" size="middle" wrap>
         <Text className="product-name">Assumptions Management</Text>
-        {activeProject && (
-          <Text className="active-project">
-            Active project: {activeProject.name}
-          </Text>
-        )}
         <Select
           aria-label="Project switcher"
           className="project-switcher"
@@ -247,6 +240,7 @@ function ProjectSelector({ projects, onOpen, onCreate }) {
             layout="vertical"
             onFinish={submit}
             requiredMark={false}
+            initialValues={{ formalReviewsEnabled: false }}
           >
             <Form.Item
               label="Project name"
@@ -261,6 +255,13 @@ function ProjectSelector({ projects, onOpen, onCreate }) {
               rules={[{ max: 1000 }]}
             >
               <Input.TextArea maxLength={1000} rows={3} />
+            </Form.Item>
+            <Form.Item
+              name="formalReviewsEnabled"
+              valuePropName="checked"
+              extra="Preserve review snapshots and compare changes. The owner can change this later in Settings & access."
+            >
+              <Checkbox>Use formal reviews</Checkbox>
             </Form.Item>
             <Button htmlType="submit" loading={busy} type="primary">
               Create private project
@@ -303,48 +304,14 @@ function ProjectSelector({ projects, onOpen, onCreate }) {
   );
 }
 
-function ProjectScreen({ user, project, onBack }) {
-  const { message } = AntApp.useApp();
-
-  return (
-    <Content className="content">
-      <Button onClick={onBack} type="link">
-        All projects
-      </Button>
-      <Title level={1}>{project.name}</Title>
-      {project.description && <Paragraph>{project.description}</Paragraph>}
-      <GuidedStart projectId={project.id} userId={user.uid} />
-      <section
-        id="project-promises"
-        tabIndex={-1}
-        aria-label="Project promises"
-      >
-        <ProjectBriefCard projectId={project.id} userId={user.uid} />
-      </section>
-      <section
-        id="project-assumptions"
-        tabIndex={-1}
-        aria-label="Assumption portfolio"
-      >
-        <AssumptionsPanel projectId={project.id} user={user} />
-      </section>
-      <section id="project-reviews" tabIndex={-1} aria-label="Project reviews">
-        <ReviewsPanel key={project.id} projectId={project.id} user={user} />
-      </section>
-      {project.creatorId === user.uid && (
-        <MembersPanel key={project.id} projectId={project.id} user={user} />
-      )}
-    </Content>
-  );
-}
-
 function Application() {
   const { message } = AntApp.useApp();
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [projects, setProjects] = useState([]);
   const [projectsLoading, setProjectsLoading] = useState(false);
-  const [pathname, setPathname] = useState(window.location.pathname);
+  const [pathname, routeTo] = useProjectNavigation();
+  const guard = useNavigationGuard();
 
   useEffect(() => {
     let generation = 0;
@@ -390,12 +357,6 @@ function Application() {
     );
   }, [user, message]);
 
-  useEffect(() => {
-    const updatePath = () => setPathname(window.location.pathname);
-    window.addEventListener("popstate", updatePath);
-    return () => window.removeEventListener("popstate", updatePath);
-  }, []);
-
   const isCreatingProject = pathname === "/projects/new";
   const invitationId = pathname.match(/^\/invitations\/([^/]+)$/)?.[1];
 
@@ -429,6 +390,7 @@ function Application() {
     invitationId,
     projectId,
     projects,
+    routeTo,
   ]);
 
   async function createAndOpen(values) {
@@ -466,7 +428,7 @@ function Application() {
       <ProjectHeader
         onCreate={() => routeTo("/projects/new")}
         onSelect={(id) => routeTo(`/projects/${id}`)}
-        onSignOut={() => signOut(auth)}
+        onSignOut={() => guard(() => signOut(auth))}
         projectId={projectId}
         projects={projects}
       />
@@ -489,7 +451,7 @@ function Application() {
           }}
         />
       ) : project ? (
-        <ProjectScreen
+        <ProjectWorkspace
           key={`${user.uid}:${project.id}`}
           onBack={() => routeTo("/projects")}
           project={project}
@@ -509,7 +471,9 @@ function Application() {
 export default function App() {
   return (
     <AntApp>
-      <Application />
+      <DraftProvider>
+        <Application />
+      </DraftProvider>
     </AntApp>
   );
 }

@@ -1,368 +1,345 @@
-import { useEffect, useState } from "react";
-import {
-  App as AntApp,
-  Button,
-  Card,
-  Empty,
-  Form,
-  Input,
-  Listy,
-  Space,
-  Spin,
-  Tag,
-  Typography,
-} from "antd";
-import {
-  addBasicAssumption,
-  loadAssumptions,
-  updateAssumption,
-  saveAssumptionChanges,
-} from "../../services.js";
+import { useEffect, useRef, useState } from "react";
+import { Alert, Button, Empty, Space, Spin, Tag, Typography } from "antd";
+import { loadAssumptions, loadInsights } from "../../services.js";
+import { useNavigationGuard } from "../workspace/draftContext.js";
 import PortfolioChart from "../portfolioChart/PortfolioChart.jsx";
-
 import CandidatesPanel from "../candidates/CandidatesPanel.jsx";
-import InsightsPanel from "./InsightsPanel.jsx";
+import AssumptionDrawer from "./AssumptionDrawer.jsx";
 
-const { Paragraph, Text } = Typography;
+import {
+  activityTime,
+  portfolioSortOptions,
+  sortPortfolio,
+} from "./portfolioSort.js";
 
-function criticalityColor(score) {
-  if (score >= 66) {
-    return "red";
-  }
-
-  if (score >= 33) {
-    return "gold";
-  }
-
-  return "green";
+function scoreColor(score, evidence = false) {
+  if (!Number.isInteger(score)) return undefined;
+  return score >= 66
+    ? evidence
+      ? "green"
+      : "red"
+    : score >= 33
+      ? "gold"
+      : evidence
+        ? "red"
+        : "green";
 }
-
-function evidenceColor(score) {
-  if (score >= 66) {
-    return "green";
-  }
-
-  if (score >= 33) {
-    return "gold";
-  }
-
-  return "red";
+export default function AssumptionsPanel(props) {
+  return <ProjectAssumptions key={props.projectId} {...props} />;
 }
-
-export default function AssumptionsPanel({ projectId, user }) {
-  return (
-    <ProjectAssumptions key={projectId} projectId={projectId} user={user} />
-  );
-}
-
-function ProjectAssumptions({ projectId, user }) {
-  const { message } = AntApp.useApp();
+function ProjectAssumptions({
+  projectId,
+  user,
+  view = "portfolio",
+  desktop = false,
+  onDrawerChange,
+  onAdopted,
+  onCandidateCount,
+}) {
+  const guard = useNavigationGuard();
   const [assumptions, setAssumptions] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [form] = Form.useForm();
-  const [editingAssumptionId, setEditingAssumptionId] = useState(null);
-  const [editingStatement, setEditingStatement] = useState("");
-  const [editBusy, setEditBusy] = useState(false);
-  const [newInsights, setNewInsights] = useState({});
-  const [scoreBusy, setScoreBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [attempt, setAttempt] = useState(0);
+  const [order, setOrder] = useState("number");
+  const [activity, setActivity] = useState(null);
+  const [activityAttempt, setActivityAttempt] = useState(0);
+  const [localActivity, setLocalActivity] = useState({});
+  const activityReady = activity?.source === assumptions && !activity.error;
+  useEffect(() => {
+    if (order !== "recent" || loading) return;
+    let active = true;
+    Promise.all(
+      assumptions.map(async (item) => [
+        item.id,
+        activityTime(item, await loadInsights(projectId, item.id)),
+      ]),
+    )
+      .then((entries) => {
+        if (active)
+          setActivity({
+            source: assumptions,
+            dates: Object.fromEntries(entries),
+          });
+      })
+      .catch(() => {
+        if (active) setActivity({ source: assumptions, error: true });
+      });
+    return () => {
+      active = false;
+    };
+  }, [order, loading, assumptions, projectId, activityAttempt]);
+  const activityDates = Object.fromEntries(
+    assumptions.map((item) => [
+      item.id,
+      Math.max(activity?.dates?.[item.id] ?? 0, localActivity[item.id] ?? 0),
+    ]),
+  );
+  const rows = sortPortfolio(
+    assumptions,
+    order === "recent" && !activityReady ? "number" : order,
+    activityDates,
+  );
   const [selectedId, setSelectedId] = useState(null);
-  const [editorFocusRequest, setEditorFocusRequest] = useState(0);
-
+  const [editor, setEditor] = useState(null);
+  const trigger = useRef(null);
+  const visible = Boolean(editor && view === "portfolio");
+  useEffect(() => {
+    onDrawerChange?.(visible);
+    return () => onDrawerChange?.(false);
+  }, [visible, onDrawerChange]);
   useEffect(() => {
     let active = true;
-
     loadAssumptions(projectId)
       .then((items) => {
         if (active) {
           setAssumptions(items);
+          setError("");
         }
       })
       .catch(() => {
-        if (active) {
-          message.error("This project is unavailable.");
-        }
+        if (active) setError("Assumptions could not be loaded. Please retry.");
       })
       .finally(() => {
-        if (active) {
-          setLoading(false);
-        }
+        if (active) setLoading(false);
       });
-
     return () => {
       active = false;
     };
-  }, [message, projectId]);
-
-  function startEditing(assumption) {
+  }, [projectId, attempt]);
+  function select(id, element) {
+    if (editor?.id === id && visible) return;
+    guard(() => {
+      trigger.current = element ?? document.activeElement;
+      setSelectedId(id);
+      setEditor({ id });
+    });
+  }
+  function close() {
+    setEditor(null);
+    requestAnimationFrame(() => {
+      if (trigger.current?.isConnected)
+        trigger.current.focus({ preventScroll: true });
+      else
+        document
+          .getElementById("project-assumptions")
+          ?.focus({ preventScroll: true });
+    });
+  }
+  function saved(assumption, didSave = false) {
+    if (didSave)
+      setLocalActivity((current) => ({
+        ...current,
+        [assumption.id]: Date.now(),
+      }));
+    setAssumptions((current) =>
+      current.some((item) => item.id === assumption.id)
+        ? current.map((item) => (item.id === assumption.id ? assumption : item))
+        : [...current, assumption],
+    );
     setSelectedId(assumption.id);
-    setEditingAssumptionId(assumption.id);
-    setEditingStatement(assumption.statement);
   }
-
-  function cancelEditing() {
-    setEditingAssumptionId(null);
-    setEditingStatement("");
-  }
-
-  function startScoring(assumption) {
-    cancelEditing();
-    setSelectedId(assumption.id);
-    setEditorFocusRequest((current) => current + 1);
-  }
-
-  async function savePortfolioScores(
-    assumptionId,
-    scores,
-    insightValues,
-    managementValues,
-  ) {
-    setScoreBusy(true);
-    try {
-      const insight = await saveAssumptionChanges(
-        user,
-        projectId,
-        assumptionId,
-        scores,
-        insightValues,
-        ...(managementValues ? [managementValues] : []),
-      );
-      // A successful commit is final even if refreshing the history later fails.
-      if (scores || insight?.managementChange)
-        setAssumptions((current) =>
-          current.map((item) =>
-            item.id === assumptionId
-              ? { ...item, ...scores, ...insight?.managementChange?.to }
-              : item,
-          ),
-        );
-      if (insight)
-        setNewInsights((current) => ({
-          ...current,
-          [assumptionId]: [insight, ...(current[assumptionId] ?? [])],
-        }));
-    } finally {
-      setScoreBusy(false);
-    }
-  }
-
-  async function saveAssumptionEdit(assumptionId) {
-    const statement = editingStatement.trim();
-
-    if (!statement) {
-      message.warning("Enter an affirmative assumption statement.");
-      return;
-    }
-
-    setEditBusy(true);
-
-    try {
-      await updateAssumption(user, projectId, assumptionId, statement);
-      setAssumptions(await loadAssumptions(projectId));
-      cancelEditing();
-      message.success("Assumption updated.");
-    } catch (error) {
-      console.error("Failed to update assumption:", error);
-      message.error("The assumption could not be updated.");
-    } finally {
-      setEditBusy(false);
-    }
-  }
-
-  async function submit(values) {
-    setBusy(true);
-
-    try {
-      await addBasicAssumption(user, projectId, values.statement);
-      setAssumptions(await loadAssumptions(projectId));
-      form.resetFields();
-      message.success("Assumption saved.");
-    } catch {
-      message.error("The assumption could not be saved.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div className="two-column">
-      <CandidatesPanel
-        projectId={projectId}
-        user={user}
-        onAdopt={(active) => {
-          setAssumptions((current) => [
-            ...current.filter((item) => item.id !== active.id),
-            active,
-          ]);
-          setSelectedId(active.id);
-        }}
-      />
-      {assumptions.length > 12 && (
-        <Paragraph className="portfolio-size-guidance">
-          There are {assumptions.length} active assumptions. About 12 often
-          keeps a portfolio manageable; keep more when they are useful.
-        </Paragraph>
-      )}
-      <Card title="Add a basic assumption">
-        <Paragraph>
-          State what is true—or must become true—for this project to deliver its
-          promises.
-        </Paragraph>
-
-        <Form
-          form={form}
-          layout="vertical"
-          onFinish={submit}
-          requiredMark={false}
+  const selected = assumptions.find((item) => item.id === editor?.id);
+  const assumptionList = (
+    <div className="workspace-assumption-list" aria-label="Active assumptions">
+      <div className="portfolio-sort-controls">
+        <label htmlFor="portfolio-sort">Sort assumptions</label>
+        <select
+          id="portfolio-sort"
+          value={order}
+          onChange={(event) => setOrder(event.target.value)}
         >
-          <Form.Item
-            extra="State the assumption affirmatively as something that is true or must become true to deliver the project promises."
-            label="Assumption"
-            name="statement"
-            rules={[{ required: true, whitespace: true, max: 2000 }]}
-          >
-            <Input.TextArea maxLength={2000} rows={4} />
-          </Form.Item>
-
-          <Button htmlType="submit" loading={busy} type="primary">
-            Save assumption
-          </Button>
-        </Form>
-      </Card>
-
-      <Card title="Saved assumptions">
-        {loading ? (
-          <Spin />
-        ) : assumptions.length === 0 ? (
-          <Empty description="No assumptions yet" />
-        ) : (
-          <Listy
-            itemRender={(assumption) => {
-              const isEditing = editingAssumptionId === assumption.id;
-              const isAssessed =
-                Number.isInteger(assumption.criticality) &&
-                Number.isInteger(assumption.evidence);
-
-              return (
-                <div
-                  role="group"
-                  aria-label={`Saved assumption: ${assumption.statement}`}
-                  className={`saved-assumption${selectedId === assumption.id ? " saved-assumption-selected" : ""}`}
-                >
-                  <Button
-                    type="text"
-                    aria-pressed={selectedId === assumption.id}
-                    onClick={() => setSelectedId(assumption.id)}
-                  >
-                    {selectedId === assumption.id
-                      ? "Selected assumption"
-                      : "Select assumption"}
-                  </Button>
-                  {isEditing ? (
-                    <Space orientation="vertical" style={{ width: "100%" }}>
-                      <Input.TextArea
-                        autoSize={{ minRows: 2, maxRows: 6 }}
-                        maxLength={2000}
-                        onChange={(event) =>
-                          setEditingStatement(event.target.value)
-                        }
-                        value={editingStatement}
-                      />
-
-                      <Text type="secondary">
-                        State the assumption affirmatively as something that is
-                        true or must become true.
-                      </Text>
-
-                      <Space>
-                        <Button
-                          loading={editBusy}
-                          onClick={() => saveAssumptionEdit(assumption.id)}
-                          type="primary"
-                        >
-                          Save
-                        </Button>
-
-                        <Button disabled={editBusy} onClick={cancelEditing}>
-                          Cancel
-                        </Button>
-                      </Space>
-                    </Space>
-                  ) : (
-                    <Space
-                      orientation="vertical"
-                      size="small"
-                      style={{ width: "100%" }}
-                    >
-                      <Paragraph style={{ margin: 0 }}>
-                        {assumption.statement}
-                      </Paragraph>
-
-                      <Space wrap>
-                        {assumption.sourceCandidateId && (
-                          <Tag>Adopted candidate</Tag>
-                        )}
-                        {isAssessed ? (
-                          <>
-                            <Tag
-                              color={criticalityColor(assumption.criticality)}
-                            >
-                              Criticality: {assumption.criticality}
-                            </Tag>
-
-                            <Tag color={evidenceColor(assumption.evidence)}>
-                              Evidence: {assumption.evidence}
-                            </Tag>
-                          </>
-                        ) : (
-                          <Tag>Not assessed</Tag>
-                        )}
-                      </Space>
-
-                      <Space>
-                        <Button
-                          disabled={scoreBusy || editBusy}
-                          onClick={() => startEditing(assumption)}
-                        >
-                          Edit statement
-                        </Button>
-
-                        <Button
-                          disabled={scoreBusy || editBusy}
-                          onClick={() => startScoring(assumption)}
-                        >
-                          {isAssessed ? "Update scores" : "Assess"}
-                        </Button>
-                      </Space>
-                    </Space>
-                  )}
-                </div>
-              );
-            }}
-            items={assumptions}
-            rowKey="id"
-          />
+          {portfolioSortOptions.map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+        {order === "attention" && (
+          <p>
+            Unassessed first. Then criticality minus evidence, highest first,
+            matching the chart’s diagonal risk direction. Equal priorities keep
+            assumption-number order.
+          </p>
         )}
-      </Card>
-
-      {!loading && (
-        <PortfolioChart
-          assumptions={assumptions}
-          selectedId={selectedId}
-          onSelect={setSelectedId}
-          onSaveScores={savePortfolioScores}
-          editingBusy={scoreBusy || editBusy}
-          editorFocusRequest={editorFocusRequest}
-        />
-      )}
-      {assumptions.some((item) => item.id === selectedId) && (
-        <InsightsPanel
-          key={selectedId}
-          newInsights={newInsights[selectedId]}
-          projectId={projectId}
-          assumption={assumptions.find((item) => item.id === selectedId)}
-        />
+        {["criticality", "evidence"].includes(order) && (
+          <p>Unassessed assumptions first; scored assumptions follow.</p>
+        )}
+        {order === "recent" && (
+          <p>
+            Includes wording, scores, next steps, help needed, and recorded
+            insights. Unknown dates appear last.
+          </p>
+        )}
+        {order === "recent" &&
+          !activityReady &&
+          (activity?.source === assumptions && activity.error ? (
+            <Alert
+              type="error"
+              title="Recent changes could not be loaded. Showing assumption-number order."
+              action={
+                <Button
+                  onClick={() => {
+                    setActivity(null);
+                    setActivityAttempt((value) => value + 1);
+                  }}
+                >
+                  Retry recent changes
+                </Button>
+              }
+            />
+          ) : (
+            <span role="status">
+              Loading recent changes… Showing assumption-number order.
+            </span>
+          ))}
+      </div>
+      {!assumptions.length ? (
+        <Empty description="No assumptions yet" />
+      ) : (
+        <ol className="portfolio-assumption-list">
+          {rows.map(({ assumption, number }) => (
+            <li
+              key={assumption.id}
+              role="group"
+              aria-label={`Saved assumption: ${assumption.statement}`}
+              className={`saved-assumption${selectedId === assumption.id ? " saved-assumption-selected" : ""}`}
+            >
+              <button
+                className="assumption-row-button"
+                type="button"
+                aria-label={`Open assumption ${number}: ${assumption.statement}`}
+                aria-pressed={selectedId === assumption.id}
+                onClick={(event) => select(assumption.id, event.currentTarget)}
+              >
+                <span className="assumption-row-statement">
+                  <span className="portfolio-key-number">{number}</span>
+                  <span>{assumption.statement}</span>
+                </span>
+                <span className="assumption-row-scores">
+                  <Tag color={scoreColor(assumption.criticality)}>
+                    Criticality: {assumption.criticality ?? "Not assessed"}
+                  </Tag>
+                  <Tag color={scoreColor(assumption.evidence, true)}>
+                    Evidence: {assumption.evidence ?? "Not assessed"}
+                  </Tag>
+                  {assumption.sourceCandidateId && <Tag>Adopted candidate</Tag>}
+                  {order === "recent" && activityReady && (
+                    <span>
+                      Last change:{" "}
+                      {activityDates[assumption.id]
+                        ? new Date(
+                            activityDates[assumption.id],
+                          ).toLocaleString()
+                        : "Date unavailable"}
+                    </span>
+                  )}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ol>
       )}
     </div>
+  );
+  return (
+    <>
+      <section
+        id="project-candidates"
+        tabIndex={-1}
+        aria-label="Project candidates"
+        hidden={view !== "candidates"}
+      >
+        <CandidatesPanel
+          projectId={projectId}
+          user={user}
+          expanded={view === "candidates"}
+          onCountChange={onCandidateCount}
+          onAdopt={(active) => {
+            saved(active, true);
+            setEditor({ id: active.id });
+            onAdopted?.();
+          }}
+        />
+      </section>
+      <section
+        id="project-assumptions"
+        tabIndex={-1}
+        aria-label="Assumption portfolio"
+        hidden={view !== "portfolio"}
+      >
+        <div className="portfolio-toolbar">
+          <Typography.Title level={2}>Portfolio</Typography.Title>
+          <Space wrap>
+            <Typography.Text>
+              {loading
+                ? "Loading assumptions…"
+                : `${assumptions.length} active assumptions`}
+            </Typography.Text>
+            <Button
+              type="primary"
+              disabled={loading || Boolean(error)}
+              onClick={(event) => {
+                const element = event.currentTarget;
+                guard(() => {
+                  trigger.current = element;
+                  setEditor({ id: crypto.randomUUID() });
+                });
+              }}
+            >
+              Add assumption
+            </Button>
+          </Space>
+        </div>
+        {assumptions.length > 12 && (
+          <Typography.Paragraph className="portfolio-size-guidance">
+            There are {assumptions.length} active assumptions. About 12 often
+            keeps a portfolio manageable; keep more when useful.
+          </Typography.Paragraph>
+        )}
+        {loading ? (
+          <Spin aria-label="Loading assumptions" />
+        ) : error ? (
+          <Alert
+            type="error"
+            title={error}
+            action={
+              <Button
+                onClick={() => {
+                  setLoading(true);
+                  setAttempt((value) => value + 1);
+                }}
+              >
+                Retry
+              </Button>
+            }
+          />
+        ) : (
+          <PortfolioChart
+            assumptions={assumptions}
+            selectedId={selectedId}
+            onSelect={select}
+            assumptionList={assumptionList}
+          />
+        )}
+      </section>
+      {visible && (
+        <AssumptionDrawer
+          key={editor.id}
+          projectId={projectId}
+          user={user}
+          assumption={selected}
+          assumptionId={editor.id}
+          number={
+            selected
+              ? assumptions.findIndex((item) => item.id === editor.id) + 1
+              : null
+          }
+          desktop={desktop}
+          onSaved={saved}
+          onClose={close}
+        />
+      )}
+    </>
   );
 }

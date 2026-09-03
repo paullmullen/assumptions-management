@@ -16,6 +16,7 @@ import {
   newReviewId,
   publishReview,
 } from "./reviewService.js";
+import { useDraft, useNavigationGuard } from "../workspace/draftContext.js";
 import { compareReview, reviewFields } from "./reviewValues.js";
 
 const display = (value) =>
@@ -144,7 +145,8 @@ function ReviewContents({ snapshot, previous }) {
   );
 }
 
-export default function ReviewsPanel({ projectId, user }) {
+export default function ReviewsPanel({ projectId, user, enabled = true }) {
+  const guard = useNavigationGuard();
   const [reviews, setReviews] = useState([]);
   const [draft, setDraft] = useState(null);
   const [selected, setSelected] = useState(null);
@@ -166,6 +168,7 @@ export default function ReviewsPanel({ projectId, user }) {
   }, [projectId, attempt]);
 
   async function start(refresh = false) {
+    if (!enabled) return;
     setBusy(true);
     setError("");
     try {
@@ -186,6 +189,7 @@ export default function ReviewsPanel({ projectId, user }) {
   }
 
   async function publish() {
+    if (!enabled) return;
     setBusy(true);
     setError("");
     try {
@@ -216,6 +220,12 @@ export default function ReviewsPanel({ projectId, user }) {
     }
   }
 
+  useDraft("Unpublished review", {
+    dirty: Boolean(draft),
+    busy,
+    discard: () => setDraft(null),
+  });
+
   const selectedPrevious =
     reviews.find((item) => item.id === selected?.previousReviewId) ?? null;
   return (
@@ -240,9 +250,17 @@ export default function ReviewsPanel({ projectId, user }) {
           }
         />
       )}
-      <Button type="primary" loading={busy} onClick={() => start()}>
-        Start review
-      </Button>
+      {!enabled && (
+        <Alert
+          type="info"
+          title="Formal reviews are off or unavailable. Published reviews remain available below. An open draft is retained, but cannot be published until reviews are enabled."
+        />
+      )}
+      {enabled && (
+        <Button type="primary" loading={busy} onClick={() => start()}>
+          Start review
+        </Button>
+      )}
       {!reviews.length && (
         <Typography.Paragraph>No published reviews yet.</Typography.Paragraph>
       )}
@@ -262,22 +280,25 @@ export default function ReviewsPanel({ projectId, user }) {
         open={Boolean(draft)}
         width={1000}
         closable={!busy}
-        maskClosable={false}
+        mask={{ closable: false }}
         keyboard={!busy}
-        onCancel={() => setDraft(null)}
+        onCancel={() => guard(() => setDraft(null))}
         footer={
           draft && (
             <Space>
-              <Button disabled={busy} onClick={() => setDraft(null)}>
+              <Button
+                disabled={busy}
+                onClick={() => guard(() => setDraft(null))}
+              >
                 Cancel review
               </Button>
-              <Button disabled={busy} onClick={() => start(true)}>
+              <Button disabled={busy || !enabled} onClick={() => start(true)}>
                 Refresh saved state
               </Button>
               <Button
                 type="primary"
                 loading={busy}
-                disabled={!draft.title.trim()}
+                disabled={!enabled || !draft.title.trim()}
                 onClick={publish}
               >
                 Publish review
@@ -293,6 +314,12 @@ export default function ReviewsPanel({ projectId, user }) {
               Publish preserves the saved state shown below. Unsaved edits are
               excluded; later project changes remain editable.
             </Typography.Paragraph>
+            {!enabled && (
+              <Alert
+                type="info"
+                title="Formal reviews are off or unavailable. Your draft is retained. You can keep editing notes or cancel; publication requires reviews to be enabled."
+              />
+            )}
             {error && <Alert role="alert" title={error} type="error" />}
             <label htmlFor="review-title">Review title</label>
             <Input

@@ -97,3 +97,24 @@ describe("formal review workflow", () => {
     expect(publishReview).not.toHaveBeenCalled();
   });
 });
+
+it("retains an open draft and blocks publication when reviews are disabled remotely", async () => {
+  const user = { uid: "u" };
+  const { rerender } = render(<ReviewsPanel projectId="p" user={user} />);
+  fireEvent.click(screen.getByRole("button", { name: "Start review" }));
+  await screen.findByRole("dialog");
+  fireEvent.change(screen.getByLabelText("Review notes (optional)"), {
+    target: { value: "Keep this discussion" },
+  });
+  rerender(<ReviewsPanel projectId="p" user={user} enabled={false} />);
+  expect(screen.getByLabelText("Review notes (optional)")).toHaveValue(
+    "Keep this discussion",
+  );
+  expect(screen.getByRole("button", { name: "Publish review" })).toBeDisabled();
+  expect(
+    screen.getByRole("button", { name: "Refresh saved state" }),
+  ).toBeDisabled();
+  expect(publishReview).not.toHaveBeenCalled();
+  rerender(<ReviewsPanel projectId="p" user={user} enabled />);
+  expect(screen.getByRole("button", { name: "Publish review" })).toBeEnabled();
+});

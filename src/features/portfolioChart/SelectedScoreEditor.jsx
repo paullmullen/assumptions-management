@@ -8,6 +8,7 @@ import {
   Space,
   Typography,
 } from "antd";
+import { useDraft } from "../workspace/draftContext.js";
 import CriticalityReminder from "../assumptions/CriticalityReminder.jsx";
 import {
   insightClassifications,
@@ -42,11 +43,11 @@ export default function SelectedScoreEditor({
       scoreInput.current?.focus({ preventScroll: true });
     }
   }, [focusRequest]);
-  if (!assumption) return null;
-  const { id } = assumption;
+  const id = assumption?.id;
+  const currentAssumption = assumption ?? {};
   const saved = {
-    criticality: assumption.criticality ?? null,
-    evidence: assumption.evidence ?? null,
+    criticality: currentAssumption.criticality ?? null,
+    evidence: currentAssumption.evidence ?? null,
   };
   const values = drafts[id] ?? saved;
   const insight = insights[id] ?? emptyInsight;
@@ -54,8 +55,8 @@ export default function SelectedScoreEditor({
     values.criticality !== saved.criticality ||
     values.evidence !== saved.evidence;
   const managementSaved = {
-    nextStep: assumption.nextStep ?? "",
-    helpNeeded: assumption.helpNeeded ?? "",
+    nextStep: currentAssumption.nextStep ?? "",
+    helpNeeded: currentAssumption.helpNeeded ?? "",
   };
   const management = { ...managementSaved, ...managementDrafts[id] };
   const managementChanges = Object.fromEntries(
@@ -109,15 +110,15 @@ export default function SelectedScoreEditor({
     setErrors((current) => ({ ...current, [targetId]: null }));
   }
   async function save(event) {
-    event.preventDefault();
-    if (!canSave) return;
+    event?.preventDefault();
+    if (!canSave) return false;
     let entry = null;
     try {
       if (hasInsight || insight.sourceUrl.trim() || insight.classification)
         entry = normalizeInsight(insight);
     } catch (error) {
       setErrors((current) => ({ ...current, [id]: error.message }));
-      return;
+      return false;
     }
     setSavingId(id);
     setSavedId(null);
@@ -127,16 +128,25 @@ export default function SelectedScoreEditor({
       else await onSave(id, dirty ? values : null, entry);
       clearDraft(id);
       setSavedId(id);
+      return true;
     } catch (error) {
       const message =
         error.code === "permission-denied"
           ? "Access was denied. Ask the project administrator to check access. Your edits are retained."
           : "Changes could not be saved. Your edits are retained; please try again.";
       setErrors((current) => ({ ...current, [id]: message }));
+      return false;
     } finally {
       setSavingId(null);
     }
   }
+  useDraft("Scores, insight and next steps", {
+    dirty: Boolean(id) && (dirty || hasInsightDraft || managementDirty),
+    busy: savingId !== null,
+    save: () => save(),
+    discard: () => clearDraft(id),
+  });
+  if (!assumption) return null;
   return (
     <section
       ref={section}

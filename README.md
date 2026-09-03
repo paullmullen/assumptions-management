@@ -2,11 +2,17 @@
 
 The current application includes verified authentication, isolated private projects, the Three Promises, affirmative assumptions, two-axis scoring, and a synchronized portfolio chart. The chart plots only fully assessed assumptions, keeps unassessed work distinct, and shows the highest unretired risk in the upper-right using labeled diagonal attention bands over the 3×3 qualitative grid.
 
-## Chart and list selection
+## Portfolio workspace
 
-Select a numbered chart point, chart-key entry, or the saved list's “Select assumption” button to highlight the same assumption throughout. The selected area below the chart immediately shows editable criticality and evidence fields, without an extra “Update scores” click or scrolling to the saved list. “Save scores” refreshes both views; “Revert changes” restores saved values. Unsaved drafts persist while switching selections within the current project. Selection and typing do not write to Firestore. Failed saves retain edits for retry. Unassessed assumptions selected in the saved list can be scored here too; they remain off the chart until saved. Switching projects clears selection and drafts. The existing saved-list editors remain available.
+Portfolio is the default project view. Use **Three Promises** above it to expand the promises, **Candidates** to capture/adopt ideas, **Reviews** for formal snapshots, and **Settings & access** for project information and owner-only access controls. The approved [next sprint plan](docs/Next-Sprint-Plan.md) is the plan of record.
 
-Manual check: select a point and edit evidence in the selected area. Switch to another point and back to confirm the draft remains. Save and confirm the point moves. Repeat with “Revert changes” and switch projects to verify isolation. Selection alone must not move or scroll the chart.
+There is one active-assumption list beside the chart. Selecting a chart point or list row opens the same immediately editable right-side drawer for wording, scores, insights, next steps, help needed, and history. Unassessed items stay in the list and off the chart until scored. Save changes commits all changed fields and score/management/insight history atomically. Add assumption uses the same drawer, with optional initial scores and supporting fields.
+
+Closing/Escape, changing selection or project, signing out, and in-app browser Back/Forward protect unsaved work. Failed saves and conflicts retain the draft. A conflict shows latest saved values and requires explicit review before saving again. Revert requires confirmation. Browser refresh/close requests the native unsaved warning when supported; drafts are not crash recovery or offline persistence.
+
+See [Slice 1B delivery and acceptance checks](docs/Workspace-Slice-1B.md). **Deploy Hosting and Firestore rules together for this slice**, especially before creating assumptions with initial insights/management fields. The development deployment command below includes both. No production dependency was added. Immutable wording/promise history remains a later goal; current history covers insights, score changes, and next-step/help changes.
+
+Use **Sort assumptions** above the list to order by consequence, evidence, recent change, or attention priority (criticality minus evidence). Chart numbers and the open drawer stay attached to the same assumptions. History is labeled **Newest first** with separated entries. See [Slice 1C](docs/Workspace-Slice-1C.md); updating from 1B requires Hosting only.
 
 ## Project collaboration
 
@@ -85,3 +91,7 @@ The optional [guided start](docs/Guided-Start.md) is available inside each proje
 ## Candidate workshop
 
 [Candidate capture and adoption](docs/Candidate-Capture-and-Adoption.md) supports multiline candidate entry, wording refinement, and explicit adoption into the active portfolio. Deploy the updated Firestore rules with Hosting using the existing development deployment command.
+
+## Optional formal reviews (Slice 2A)
+
+New projects default to reviews off, with an explicit creation choice. Owners can change **Use formal reviews** in **Settings & access**. Existing projects stay enabled; turning reviews off preserves prior snapshots and ordinary history. Deploy Hosting and Firestore rules together. See [Slice 2A](docs/Workspace-Slice-2A.md) for details and acceptance checks.

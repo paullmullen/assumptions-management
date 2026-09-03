@@ -89,8 +89,9 @@ service cloud.firestore {
     }
 
     function hasProjectFields(data) {
-      return data.keys().hasOnly(['name', 'description', 'creatorId', 'createdAt'])
+      return data.keys().hasOnly(['name', 'description', 'creatorId', 'createdAt', 'formalReviewsEnabled'])
         && data.keys().hasAll(['name', 'creatorId', 'createdAt'])
+        && (!('formalReviewsEnabled' in data) || data.formalReviewsEnabled is bool)
         && data.name is string
         && data.name.size() > 0
         && data.name.size() <= 120
@@ -161,7 +162,12 @@ service cloud.firestore {
           request.auth.uid
         );
       allow read: if isActiveMember(projectId);
-      allow update, delete: if false;
+      allow update: if isProjectOwner(projectId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['formalReviewsEnabled', 'reviewPreferenceUpdatedBy', 'reviewPreferenceUpdatedAt'])
+        && request.resource.data.formalReviewsEnabled is bool
+        && request.resource.data.reviewPreferenceUpdatedBy == request.auth.uid
+        && request.resource.data.reviewPreferenceUpdatedAt == request.time;
+      allow delete: if false;
 
       match /members/{userId} {
         allow read: if isProjectOwner(projectId);
@@ -188,6 +194,7 @@ service cloud.firestore {
       match /reviews/{reviewId} {
         allow read: if isActiveMember(projectId);
         allow create: if isActiveMember(projectId)
+          && getAfter(/databases/$(database)/documents/projects/$(projectId)).data.get('formalReviewsEnabled', true) == true
           && request.resource.data.keys().hasOnly(['schemaVersion', 'title', 'notes', 'previousReviewId', 'capturedAt', 'assumptions', 'promises', 'publishedBy', 'publisherEmail', 'publishedAt'])
           && request.resource.data.keys().hasAll(['schemaVersion', 'title', 'notes', 'previousReviewId', 'capturedAt', 'assumptions', 'promises', 'publishedBy', 'publisherEmail', 'publishedAt'])
           && request.resource.data.schemaVersion == 1
@@ -293,7 +300,7 @@ match /assumptions/{assumptionId} {
   }
   function validScoreChange(data, insightId) {
     let parentPath = /databases/$(database)/documents/projects/$(projectId)/assumptions/$(assumptionId);
-    let before = get(parentPath).data;
+    let before = exists(parentPath) ? get(parentPath).data : {};
     let after = getAfter(parentPath).data;
     return data.scoreChange is map
       && data.scoreChange.keys().hasOnly(['from', 'to'])
@@ -313,7 +320,7 @@ match /assumptions/{assumptionId} {
       && existsAfter(recordPath)
       && getAfter(recordPath).data.createdBy == request.auth.uid
       && getAfter(recordPath).data.createdAt == request.time
-      && getAfter(recordPath).data.scoreChange.from == scorePair(resource.data)
+      && getAfter(recordPath).data.scoreChange.from == scorePair(resource == null ? {} : resource.data)
       && getAfter(recordPath).data.scoreChange.to == scorePair(request.resource.data);
   }
 
@@ -322,7 +329,7 @@ match /assumptions/{assumptionId} {
   }
   function validManagementChange(data, insightId) {
     let parentPath = /databases/$(database)/documents/projects/$(projectId)/assumptions/$(assumptionId);
-    let before = get(parentPath).data;
+    let before = exists(parentPath) ? get(parentPath).data : {};
     let after = getAfter(parentPath).data;
     return data.managementChange is map
       && data.managementChange.keys().hasOnly(['from', 'to'])
@@ -342,7 +349,7 @@ match /assumptions/{assumptionId} {
       && existsAfter(recordPath)
       && getAfter(recordPath).data.createdBy == request.auth.uid
       && getAfter(recordPath).data.createdAt == request.time
-      && getAfter(recordPath).data.managementChange.from == managementPair(resource.data)
+      && getAfter(recordPath).data.managementChange.from == managementPair(resource == null ? {} : resource.data)
       && getAfter(recordPath).data.managementChange.to == managementPair(request.resource.data);
   }
 
@@ -353,7 +360,7 @@ match /assumptions/{assumptionId} {
   match /insights/{insightId} {
     allow read: if isActiveMember(projectId);
     allow create: if isActiveMember(projectId)
-      && exists(/databases/$(database)/documents/projects/$(projectId)/assumptions/$(assumptionId))
+      && existsAfter(/databases/$(database)/documents/projects/$(projectId)/assumptions/$(assumptionId))
       && request.resource.data.keys().hasOnly(['description', 'createdBy', 'authorEmail', 'createdAt', 'sourceUrl', 'classification', 'scoreChange', 'managementChange'])
       && request.resource.data.keys().hasAll(['createdBy', 'authorEmail', 'createdAt'])
       && (('description' in request.resource.data && request.resource.data.description is string
@@ -385,7 +392,7 @@ match /assumptions/{assumptionId} {
       'criticality',
       'evidence',
       'createdBy',
-      'createdAt'
+      'createdAt', 'nextStep', 'helpNeeded', 'updatedBy', 'updatedAt', 'lastScoreChangeId', 'lastManagementChangeId'
     ])
     && request.resource.data.keys().hasAll([
       'statement',
@@ -396,6 +403,12 @@ match /assumptions/{assumptionId} {
     && request.resource.data.statement.size() > 0
     && request.resource.data.statement.size() <= 2000
     && hasValidAssumptionScores(request.resource.data)
+    && validManagementFields(request.resource.data)
+    && (!('updatedAt' in request.resource.data) || request.resource.data.updatedAt == request.time)
+    && (!('updatedBy' in request.resource.data) || request.resource.data.updatedBy == request.auth.uid)
+    && (!('lastScoreChangeId' in request.resource.data) || hasScoreChangeRecord())
+    && (request.resource.data.get('nextStep', '') != '' || request.resource.data.get('helpNeeded', '') != ''
+      ? hasManagementChangeRecord() : !('lastManagementChangeId' in request.resource.data))
     && request.resource.data.createdBy == request.auth.uid
     && request.resource.data.createdAt is timestamp
     && (!('sourceCandidateId' in request.resource.data) || validCandidateOrigin());

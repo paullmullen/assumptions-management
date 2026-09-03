@@ -15,16 +15,16 @@ const steps = [
     text: "For each promise, ask what is true—or must become true—to deliver it. Start with about 12 important assumptions; this is guidance, not a limit. Use Candidate workshop to collect and refine ideas, then adopt them into the portfolio. You can also add an active assumption directly, before scoring it.",
     example:
       "An assumption: “Customers will pay enough to cover delivery costs.” A question (“Will customers pay?”), task (“Interview customers”), risk (“Low demand”), or goal (“Grow revenue”) needs a statement of what must be true.",
-    target: "project-assumptions",
-    action: "Go to assumptions",
+    target: "project-candidates",
+    action: "Go to candidates",
   },
   {
     title: "Check for blind spots",
     text: "Consider technical feasibility, regulatory requirements, user adoption, quality, commercial and distribution needs, service and support, funding, and team dynamics. Add any important assumptions these reveal, or simply continue.",
     example:
       "This is a prompt for discussion, not proof that the portfolio is complete. You do not need to categorize each assumption.",
-    target: "project-assumptions",
-    action: "Go to assumptions",
+    target: "project-candidates",
+    action: "Go to candidates",
   },
   {
     title: "Assess and prioritize",
@@ -61,18 +61,35 @@ function readProgress(key) {
   return { open: false, step: 0 };
 }
 
-export default function GuidedStart({ projectId, userId }) {
+export default function GuidedStart({
+  projectId,
+  userId,
+  onNavigate,
+  reviewsEnabled = true,
+}) {
   return (
     <Guide
       key={`${userId}:${projectId}`}
+      onNavigate={onNavigate}
+      reviewsEnabled={reviewsEnabled}
       storageKey={`assumptions-guide:${userId}:${projectId}`}
     />
   );
 }
 
-function Guide({ storageKey }) {
+function Guide({ storageKey, onNavigate, reviewsEnabled }) {
   const [progress, setProgress] = useState(() => readProgress(storageKey));
-  const current = steps[progress.step];
+  const current =
+    !reviewsEnabled && progress.step === steps.length - 1
+      ? {
+          title: "Record learning",
+          text: "Use the selected assumption’s editor to record new insights, next steps, and help needed. Insights can be saved without changing scores; your history is retained.",
+          example:
+            "Formal reviews are optional. The project owner can enable snapshots later in Settings & access.",
+          target: "project-assumptions",
+          action: "Go to the portfolio",
+        }
+      : steps[progress.step];
   function update(next) {
     setProgress(next);
     try {
@@ -82,6 +99,10 @@ function Guide({ storageKey }) {
     }
   }
   function goToEditor() {
+    if (onNavigate) {
+      onNavigate(current.target);
+      return;
+    }
     const target = document.getElementById(current.target);
     target?.focus({ preventScroll: true });
     target?.scrollIntoView?.({ behavior: "smooth", block: "start" });

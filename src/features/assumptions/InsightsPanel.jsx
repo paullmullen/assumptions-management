@@ -47,6 +47,7 @@ export default function InsightsPanel({
   return (
     <Card
       title="Recorded insights and changes"
+      extra={<Typography.Text type="secondary">Newest first</Typography.Text>}
       style={{ gridColumn: "1 / -1" }}
     >
       {loading ? (
@@ -73,7 +74,11 @@ export default function InsightsPanel({
         </Typography.Paragraph>
       ) : null}
       {visibleItems.map((item) => (
-        <article key={item.id} aria-label="Recorded insight">
+        <article
+          key={item.id}
+          aria-label="Recorded insight"
+          className="insight-history-entry"
+        >
           {item.description && (
             <Typography.Paragraph style={{ whiteSpace: "pre-wrap" }}>
               {item.description}

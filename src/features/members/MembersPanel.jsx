@@ -1,3 +1,4 @@
+import { useDraft } from "../workspace/draftContext.js";
 import { useNow } from "./useNow.js";
 import { useEffect, useState } from "react";
 import {
@@ -27,6 +28,15 @@ export default function MembersPanel({ projectId, user }) {
   const [busy, setBusy] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [form] = Form.useForm();
+  const [dirty, setDirty] = useState(false);
+  useDraft("Invitation email", {
+    dirty,
+    busy,
+    discard: () => {
+      form.resetFields();
+      setDirty(false);
+    },
+  });
   useEffect(() => {
     let active = true;
     Promise.all([loadMembers(projectId), loadInvitations(projectId)])
@@ -119,10 +129,12 @@ export default function MembersPanel({ projectId, user }) {
       <Form
         form={form}
         layout="inline"
+        onValuesChange={(_, values) => setDirty(Boolean(values.email))}
         onFinish={({ email }) =>
           change(async () => {
             await inviteMember(user, projectId, email);
             form.resetFields();
+            setDirty(false);
           }, "Invitation created. Copy its link below and share it with the recipient.")
         }
       >

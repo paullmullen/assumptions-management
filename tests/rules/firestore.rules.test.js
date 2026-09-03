@@ -30,6 +30,7 @@ import {
 import {
   updateAssumptionScores,
   saveAssumptionChanges,
+  saveAssumptionDraft,
   addInsight,
   addCandidates,
   editCandidate,
@@ -1169,6 +1170,66 @@ describe("formal review publication", () => {
     testEnv
       .authenticatedContext(ownerId, { email_verified: true, email })
       .firestore();
+  it("preserves history, blocks new snapshots while off, and resumes after re-enabling", async () => {
+    await seedPrivateProject();
+    serviceDb = ownerDb();
+    const { publishReview } =
+      await import("../../src/features/reviews/reviewService.js");
+    const { saveReviewPreference } =
+      await import("../../src/features/reviews/reviewPreference.js");
+    const user = { uid: ownerId, email };
+    const captured = await captureReview(projectId);
+    const payload = {
+      ...captured.snapshot,
+      title: "Saved",
+      notes: "",
+      previousReviewId: null,
+    };
+    await publishReview(user, projectId, "saved", payload);
+    await saveReviewPreference(projectId, user, false);
+    await assertSucceeds(
+      getDoc(doc(serviceDb, "projects", projectId, "reviews", "saved")),
+    );
+    await assertFails(
+      setDoc(
+        doc(serviceDb, "projects", projectId, "reviews", "blocked"),
+        values(),
+      ),
+    );
+    await expect(captureReview(projectId)).rejects.toThrow("turned off");
+    await expect(
+      publishReview(user, projectId, "stale-draft", payload),
+    ).rejects.toThrow("turned off");
+    // A retry confirming a previously committed publication remains idempotent.
+    await publishReview(user, projectId, "saved", payload);
+    await setDoc(
+      doc(serviceDb, "projects", projectId, "assumptions", "existing"),
+      {
+        statement: "We can deliver.",
+        createdBy: ownerId,
+        createdAt: serverTimestamp(),
+      },
+    );
+    await assertSucceeds(
+      addInsight(user, projectId, "existing", {
+        description: "Learning continues",
+      }),
+    );
+    await saveReviewPreference(projectId, user, true);
+    await publishReview(user, projectId, "resumed", payload);
+  });
+  it("rejects publication batched with disabling reviews", async () => {
+    await seedPrivateProject();
+    const db = ownerDb();
+    const batch = writeBatch(db);
+    batch.update(doc(db, "projects", projectId), {
+      formalReviewsEnabled: false,
+      reviewPreferenceUpdatedBy: ownerId,
+      reviewPreferenceUpdatedAt: serverTimestamp(),
+    });
+    batch.set(doc(db, "projects", projectId, "reviews", "r"), values());
+    await assertFails(batch.commit());
+  });
   it("allows a member to publish and read but never edit or delete a snapshot", async () => {
     await seedPrivateProject();
     const ref = doc(ownerDb(), "projects", projectId, "reviews", "r1");
@@ -1991,4 +2052,411 @@ describe("Candidate capture and adoption", () => {
     );
     expect(await loadCandidates(projectId)).toHaveLength(20);
   });
+});
+
+describe("Unified assumption drawer saves", () => {
+  const user = { uid: ownerId, email: "owner@example.com" };
+  const initial = {
+    statement: "Customers will adopt it.",
+    criticality: 80,
+    evidence: 20,
+    nextStep: "",
+    helpNeeded: "",
+  };
+  const parent = `projects/${projectId}/assumptions/drawer`;
+  beforeEach(async () => {
+    await seedPrivateProject();
+    serviceDb = testEnv
+      .authenticatedContext(ownerId, {
+        email_verified: true,
+        email: user.email,
+      })
+      .firestore();
+    await setDoc(doc(serviceDb, parent), {
+      statement: initial.statement,
+      criticality: 80,
+      evidence: 20,
+      createdBy: ownerId,
+      createdAt: Timestamp.now(),
+    });
+  });
+  it("atomically saves wording, scores, management and an attributed insight", async () => {
+    const next = {
+      ...initial,
+      statement: "Customers will pay for it.",
+      evidence: 65,
+      nextStep: "Run a pilot",
+      helpNeeded: "Two customers",
+    };
+    const result = await saveAssumptionDraft(
+      user,
+      projectId,
+      "drawer",
+      initial,
+      next,
+      { description: "Pilot interviews" },
+    );
+    expect((await getDoc(doc(serviceDb, parent))).data()).toMatchObject(next);
+    expect(result.assumption).toMatchObject(next);
+    const records = await getDocs(collection(serviceDb, parent, "insights"));
+    expect(records.size).toBe(1);
+    expect(records.docs[0].data()).toMatchObject({
+      description: "Pilot interviews",
+      createdBy: ownerId,
+      authorEmail: user.email,
+      scoreChange: {
+        from: { criticality: 80, evidence: 20 },
+        to: { criticality: 80, evidence: 65 },
+      },
+      managementChange: {
+        from: { nextStep: "", helpNeeded: "" },
+        to: { nextStep: "Run a pilot", helpNeeded: "Two customers" },
+      },
+    });
+  });
+  it("rejects a stale edit without saving wording or an insight", async () => {
+    await updateAssumptionScores(user, projectId, "drawer", {
+      criticality: 80,
+      evidence: 45,
+    });
+    await expect(
+      saveAssumptionDraft(
+        user,
+        projectId,
+        "drawer",
+        initial,
+        { ...initial, statement: "Changed wording", evidence: 60 },
+        { description: "Stale note" },
+      ),
+    ).rejects.toMatchObject({
+      code: "assumption-conflict",
+      fields: ["evidence"],
+    });
+    expect((await getDoc(doc(serviceDb, parent))).data()).toMatchObject({
+      statement: initial.statement,
+      evidence: 45,
+    });
+    expect(
+      (await getDocs(collection(serviceDb, parent, "insights"))).size,
+    ).toBe(1);
+  });
+  it("allows only one competing update from the same baseline", async () => {
+    const results = await Promise.allSettled([
+      saveAssumptionDraft(
+        user,
+        projectId,
+        "drawer",
+        initial,
+        { ...initial, evidence: 50 },
+        { description: "First editor" },
+      ),
+      saveAssumptionDraft(
+        user,
+        projectId,
+        "drawer",
+        initial,
+        { ...initial, evidence: 70 },
+        { description: "Second editor" },
+      ),
+    ]);
+    expect(
+      results.filter((result) => result.status === "fulfilled"),
+    ).toHaveLength(1);
+    expect(
+      results.find((result) => result.status === "rejected").reason.code,
+    ).toBe("assumption-conflict");
+    expect(
+      (await getDocs(collection(serviceDb, parent, "insights"))).size,
+    ).toBe(1);
+  });
+  it("checks latest wording even for an insight-only save", async () => {
+    await updateDoc(doc(serviceDb, parent), {
+      statement: "A revised assumption.",
+      updatedBy: ownerId,
+      updatedAt: serverTimestamp(),
+    });
+    await expect(
+      saveAssumptionDraft(user, projectId, "drawer", initial, initial, {
+        description: "Learning",
+      }),
+    ).rejects.toMatchObject({
+      code: "assumption-conflict",
+      fields: ["statement"],
+    });
+    expect(
+      (await getDocs(collection(serviceDb, parent, "insights"))).size,
+    ).toBe(0);
+  });
+  it("preserves concurrent changes to untouched fields and creates no no-op history", async () => {
+    await saveAssumptionChanges(user, projectId, "drawer", null, null, {
+      helpNeeded: "Remote help",
+    });
+    const result = await saveAssumptionDraft(
+      user,
+      projectId,
+      "drawer",
+      initial,
+      { ...initial, nextStep: "My next step" },
+      {},
+    );
+    expect(result.assumption).toMatchObject({
+      nextStep: "My next step",
+      helpNeeded: "Remote help",
+    });
+    const count = (await getDocs(collection(serviceDb, parent, "insights")))
+      .size;
+    await saveAssumptionDraft(
+      user,
+      projectId,
+      "drawer",
+      result.assumption,
+      result.assumption,
+      {},
+    );
+    expect(
+      (await getDocs(collection(serviceDb, parent, "insights"))).size,
+    ).toBe(count);
+  });
+  it("creates all initial fields and history in one transaction, including zero scores", async () => {
+    const next = {
+      ...initial,
+      criticality: 0,
+      evidence: 0,
+      nextStep: "Initial plan",
+      helpNeeded: "Funding",
+    };
+    const result = await saveAssumptionDraft(
+      user,
+      projectId,
+      "new-drawer",
+      null,
+      next,
+      { description: "Initial insight" },
+    );
+    const created = `projects/${projectId}/assumptions/new-drawer`;
+    expect((await getDoc(doc(serviceDb, created))).data()).toMatchObject(next);
+    expect(result.insight.scoreChange.from).toEqual({
+      criticality: null,
+      evidence: null,
+    });
+    expect(
+      (await getDocs(collection(serviceDb, created, "insights"))).size,
+    ).toBe(1);
+    await expect(
+      saveAssumptionDraft(user, projectId, "new-drawer", null, next, {}),
+    ).rejects.toMatchObject({ code: "assumption-conflict" });
+  });
+  it("creates an unscored assumption and permits insight-only creation", async () => {
+    const result = await saveAssumptionDraft(
+      user,
+      projectId,
+      "unscored-drawer",
+      null,
+      { statement: "We can support it." },
+      { description: "We should investigate" },
+    );
+    expect(result.assumption).not.toHaveProperty("criticality");
+    expect(
+      (
+        await getDocs(
+          collection(
+            serviceDb,
+            `projects/${projectId}/assumptions/unscored-drawer/insights`,
+          ),
+        )
+      ).size,
+    ).toBe(1);
+  });
+  it("rejects invalid input and outsider writes without partially creating anything", async () => {
+    await expect(
+      saveAssumptionDraft(
+        user,
+        projectId,
+        "invalid-drawer",
+        null,
+        { ...initial, evidence: null },
+        {},
+      ),
+    ).rejects.toThrow(/both scores/);
+    expect(
+      (
+        await getDoc(
+          doc(serviceDb, `projects/${projectId}/assumptions/invalid-drawer`),
+        )
+      ).exists(),
+    ).toBe(false);
+    serviceDb = testEnv
+      .authenticatedContext(otherUserId, {
+        email_verified: true,
+        email: "other@example.com",
+      })
+      .firestore();
+    await assertFails(
+      saveAssumptionDraft(
+        { uid: otherUserId, email: "other@example.com" },
+        projectId,
+        "forbidden",
+        null,
+        initial,
+        { description: "Forbidden" },
+      ),
+    );
+    expect(
+      (
+        await adminDocument(`projects/${projectId}/assumptions/forbidden`)
+      ).exists(),
+    ).toBe(false);
+  });
+  it("denies initial management without matching history and denies forged initial history", async () => {
+    await assertFails(
+      setDoc(doc(serviceDb, `projects/${projectId}/assumptions/no-history`), {
+        statement: "Test",
+        createdBy: ownerId,
+        createdAt: serverTimestamp(),
+        nextStep: "Unrecorded",
+      }),
+    );
+    const ref = doc(serviceDb, `projects/${projectId}/assumptions/forged`);
+    const batch = writeBatch(serviceDb);
+    batch.set(ref, {
+      statement: "Test",
+      createdBy: ownerId,
+      createdAt: serverTimestamp(),
+      criticality: 80,
+      evidence: 20,
+      updatedBy: ownerId,
+      updatedAt: serverTimestamp(),
+      lastScoreChangeId: "fake",
+    });
+    batch.set(doc(ref, "insights", "fake"), {
+      createdBy: ownerId,
+      authorEmail: user.email,
+      createdAt: serverTimestamp(),
+      scoreChange: {
+        from: { criticality: 1, evidence: 1 },
+        to: { criticality: 80, evidence: 20 },
+      },
+    });
+    await assertFails(batch.commit());
+    expect((await getDoc(ref)).exists()).toBe(false);
+  });
+});
+
+describe("project review preference", () => {
+  it("restricts updates to the active owner and preserves immutable project fields", async () => {
+    await seedPrivateProject();
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(
+        doc(
+          context.firestore(),
+          "users",
+          otherUserId,
+          "projectMemberships",
+          projectId,
+        ),
+        membership(projectId, otherUserId, "member"),
+      );
+    });
+    const patch = {
+      formalReviewsEnabled: false,
+      reviewPreferenceUpdatedBy: ownerId,
+      reviewPreferenceUpdatedAt: serverTimestamp(),
+    };
+    const ref = doc(
+      verifiedContext(ownerId).firestore(),
+      "projects",
+      projectId,
+    );
+    await assertSucceeds(updateDoc(ref, patch));
+    for (const invalid of [
+      { formalReviewsEnabled: "false" },
+      { reviewPreferenceUpdatedBy: otherUserId },
+      { reviewPreferenceUpdatedAt: Timestamp.now() },
+      { creatorId: otherUserId },
+      { name: "Renamed" },
+      { extra: true },
+    ])
+      await assertFails(updateDoc(ref, { ...patch, ...invalid }));
+    await assertFails(
+      updateDoc(
+        doc(verifiedContext(otherUserId).firestore(), "projects", projectId),
+        { ...patch, reviewPreferenceUpdatedBy: otherUserId },
+      ),
+    );
+    await assertFails(
+      updateDoc(
+        doc(
+          testEnv.unauthenticatedContext().firestore(),
+          "projects",
+          projectId,
+        ),
+        patch,
+      ),
+    );
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(
+        doc(
+          context.firestore(),
+          "users",
+          ownerId,
+          "projectMemberships",
+          projectId,
+        ),
+        { active: false },
+      );
+    });
+    await assertFails(updateDoc(ref, patch));
+  });
+  it("creates projects with explicit review choices and defaults new projects off", async () => {
+    serviceDb = verifiedContext(ownerId).firestore();
+    const { createProject } = await import("../../src/services.js");
+    for (const choice of [undefined, false, true]) {
+      const id = await createProject(
+        { uid: ownerId },
+        { name: "New project", formalReviewsEnabled: choice },
+      );
+      expect(
+        (await getDoc(doc(serviceDb, "projects", id))).data()
+          .formalReviewsEnabled,
+      ).toBe(choice === true);
+    }
+  });
+});
+
+it("keeps reviews off through the live subscription and reopening the project", async () => {
+  await seedPrivateProject();
+  serviceDb = verifiedContext(ownerId).firestore();
+  const { watchReviewPreference, saveReviewPreference } =
+    await import("../../src/features/reviews/reviewPreference.js");
+  let stop = () => {};
+  let reopenedStop = () => {};
+  try {
+    let receiveOff;
+    const off = new Promise((resolve) => {
+      receiveOff = resolve;
+    });
+    stop = watchReviewPreference(
+      projectId,
+      (enabled) => {
+        if (!enabled) receiveOff();
+      },
+      (error) => {
+        throw error;
+      },
+    );
+    await saveReviewPreference(projectId, { uid: ownerId }, false);
+    await off;
+    expect(
+      (await getDoc(doc(serviceDb, "projects", projectId))).data()
+        .formalReviewsEnabled,
+    ).toBe(false);
+    stop();
+    const reopened = await new Promise((resolve, reject) => {
+      reopenedStop = watchReviewPreference(projectId, resolve, reject);
+    });
+    expect(reopened).toBe(false);
+  } finally {
+    stop();
+    reopenedStop();
+  }
 });

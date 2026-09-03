@@ -16,25 +16,36 @@ import {
   editCandidate,
   loadCandidates,
 } from "../../services.js";
+import { useDraft, useNavigationGuard } from "../workspace/draftContext.js";
 import { wordingHint } from "./candidateValues.js";
 
-export default function CandidatesPanel({ projectId, user, onAdopt }) {
-  const [open, setOpen] = useState(false);
-  const [visited, setVisited] = useState(false);
+export default function CandidatesPanel({
+  projectId,
+  user,
+  onAdopt,
+  expanded,
+  onCountChange,
+}) {
+  const [internalOpen, setOpen] = useState(false);
+  const [internalVisited, setVisited] = useState(false);
+  const open = expanded ?? internalOpen;
+  const visited = expanded !== undefined || internalVisited;
   return (
     <Card
       className="candidate-panel"
       title="Candidate workshop"
       extra={
-        <Button
-          aria-expanded={open}
-          onClick={() => {
-            setVisited(true);
-            setOpen(!open);
-          }}
-        >
-          {open ? "Hide candidates" : "Open candidates"}
-        </Button>
+        expanded === undefined && (
+          <Button
+            aria-expanded={open}
+            onClick={() => {
+              setVisited(true);
+              setOpen(!open);
+            }}
+          >
+            {open ? "Hide candidates" : "Open candidates"}
+          </Button>
+        )
       }
     >
       <Typography.Paragraph style={{ marginBottom: 0 }}>
@@ -48,6 +59,7 @@ export default function CandidatesPanel({ projectId, user, onAdopt }) {
             projectId={projectId}
             user={user}
             onAdopt={onAdopt}
+            onCountChange={onCountChange}
           />
         )}
       </div>
@@ -55,7 +67,8 @@ export default function CandidatesPanel({ projectId, user, onAdopt }) {
   );
 }
 
-function CandidateWorkshop({ projectId, user, onAdopt }) {
+function CandidateWorkshop({ projectId, user, onAdopt, onCountChange }) {
+  const guard = useNavigationGuard();
   const { message } = AntApp.useApp();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -90,16 +103,57 @@ function CandidateWorkshop({ projectId, user, onAdopt }) {
     setBusy(true);
     try {
       await action();
+      return true;
     } catch (cause) {
       message.error(
         cause.code
           ? "The change could not be saved. Check your access and refresh candidates before retrying."
           : cause.message,
       );
+      return false;
     } finally {
       setBusy(false);
     }
   }
+  useEffect(() => {
+    if (!loading && !error)
+      onCountChange?.(items.filter((item) => item.status === "pending").length);
+  }, [items, loading, error, onCountChange]);
+  async function saveCapture() {
+    if (loading || error || busy) return false;
+    return perform(async () => {
+      const added = await addCandidates(user, projectId, text);
+      setItems((current) => [...current, ...added]);
+      setText("");
+      message.success("Candidates saved.");
+    });
+  }
+  async function saveWording() {
+    if (!statement.trim() || busy) return false;
+    return perform(async () => {
+      const saved = await editCandidate(user, projectId, editing, statement);
+      setItems((current) =>
+        current.map((row) =>
+          row.id === editing ? { ...row, statement: saved } : row,
+        ),
+      );
+      setEditing(null);
+    });
+  }
+  useDraft("Candidate capture", {
+    dirty: Boolean(text),
+    busy,
+    save: saveCapture,
+    discard: () => setText(""),
+  });
+  useDraft("Candidate wording", {
+    dirty:
+      editing !== null &&
+      statement !== items.find((item) => item.id === editing)?.statement,
+    busy,
+    save: saveWording,
+    discard: () => setEditing(null),
+  });
   function refresh() {
     setLoading(true);
     setRevision((value) => value + 1);
@@ -134,14 +188,7 @@ function CandidateWorkshop({ projectId, user, onAdopt }) {
         <Button
           type="primary"
           disabled={loading || Boolean(error) || busy || !text.trim()}
-          onClick={() =>
-            perform(async () => {
-              const added = await addCandidates(user, projectId, text);
-              setItems((current) => [...current, ...added]);
-              setText("");
-              message.success("Candidates saved.");
-            })
-          }
+          onClick={saveCapture}
         >
           Save candidates
         </Button>
@@ -186,28 +233,14 @@ function CandidateWorkshop({ projectId, user, onAdopt }) {
                     <Space wrap>
                       <Button
                         disabled={busy || !statement.trim()}
-                        onClick={() =>
-                          perform(async () => {
-                            const saved = await editCandidate(
-                              user,
-                              projectId,
-                              item.id,
-                              statement,
-                            );
-                            setItems((current) =>
-                              current.map((row) =>
-                                row.id === item.id
-                                  ? { ...row, statement: saved }
-                                  : row,
-                              ),
-                            );
-                            setEditing(null);
-                          })
-                        }
+                        onClick={saveWording}
                       >
                         Save wording
                       </Button>
-                      <Button disabled={busy} onClick={() => setEditing(null)}>
+                      <Button
+                        disabled={busy}
+                        onClick={() => guard(() => setEditing(null))}
+                      >
                         Cancel
                       </Button>
                     </Space>
@@ -244,25 +277,27 @@ function CandidateWorkshop({ projectId, user, onAdopt }) {
                         <Button
                           disabled={busy || editing !== null}
                           onClick={() =>
-                            perform(async () => {
-                              const active = await adoptCandidate(
-                                user,
-                                projectId,
-                                item.id,
-                                item.statement,
-                              );
-                              setItems((current) =>
-                                current.map((row) =>
-                                  row.id === item.id
-                                    ? { ...row, status: "adopted" }
-                                    : row,
-                                ),
-                              );
-                              onAdopt(active);
-                              message.success(
-                                "Adopted into the active portfolio.",
-                              );
-                            })
+                            guard(() =>
+                              perform(async () => {
+                                const active = await adoptCandidate(
+                                  user,
+                                  projectId,
+                                  item.id,
+                                  item.statement,
+                                );
+                                setItems((current) =>
+                                  current.map((row) =>
+                                    row.id === item.id
+                                      ? { ...row, status: "adopted" }
+                                      : row,
+                                  ),
+                                );
+                                onAdopt(active);
+                                message.success(
+                                  "Adopted into the active portfolio.",
+                                );
+                              }),
+                            )
                           }
                         >
                           Adopt into portfolio
