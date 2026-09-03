@@ -2,6 +2,10 @@
 
 The current application includes verified authentication, isolated private projects, the Three Promises, affirmative assumptions, two-axis scoring, and a synchronized portfolio chart. The chart plots only fully assessed assumptions, keeps unassessed work distinct, and shows the highest unretired risk in the upper-right using labeled diagonal attention bands over the 3×3 qualitative grid.
 
+## Sign-in and project contact
+
+**Continue with Google** is the primary onboarding path; email/password remains available. Contact: **mullenpaull@gmail.com**. Enable Google in Firebase before using the button. See [Google setup and existing-account connection](docs/Google-Sign-In.md), especially before switching from an Outlook account to Gmail. Deploy Hosting only for this slice. Custom email delivery is deferred; keep `VITE_AUTH_EMAIL_DELIVERY=firebase`.
+
 ## Portfolio workspace
 
 Portfolio is the default project view. Use **Three Promises** above it to expand the promises, **Candidates** to capture/adopt ideas, **Reviews** for formal snapshots, and **Settings & access** for project information and owner-only access controls. The approved [next sprint plan](docs/Next-Sprint-Plan.md) is the plan of record.
@@ -95,3 +99,7 @@ The optional [guided start](docs/Guided-Start.md) is available inside each proje
 ## Optional formal reviews (Slice 2A)
 
 New projects default to reviews off, with an explicit creation choice. Owners can change **Use formal reviews** in **Settings & access**. Existing projects stay enabled; turning reviews off preserves prior snapshots and ordinary history. Deploy Hosting and Firestore rules together. See [Slice 2A](docs/Workspace-Slice-2A.md) for details and acceptance checks.
+
+## Branded authentication emails
+
+Verification/resend and password reset can use Firebase-generated links and SMTP2GO delivery. The approved backend SDKs have a separate Node 22 package. Follow [Authentication email setup](docs/Authentication-Email-Setup.md) before enabling custom delivery. New commands: `npm run deploy:email`, `npm run test:email-core`, and `npm run test:email`. The default frontend delivery remains native until explicitly switched to custom.

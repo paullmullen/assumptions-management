@@ -1,0 +1,14 @@
+Assumptions Management
+
+One step before you begin
+
+Verify your email address to start working with your project team in Assumptions Management.
+
+Verify my email:
+https://preview.example.invalid/__/auth/action?mode=verifyEmail&oobCode=PREVIEW-ONLY-NOT-A-REAL-LINK
+
+After verifying, return to Assumptions Management and sign in.
+
+If this link is expired or already used, request a new email from the app.
+
+If you did not create an account, you can ignore this email.

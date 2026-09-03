@@ -30,6 +30,7 @@ vi.mock("firebase/auth", () => ({
 vi.mock("./verification.js", () => ({
   refreshVerificationState: vi.fn().mockResolvedValue(true),
   sendVerificationEmail: vi.fn(),
+  requestPasswordResetEmail: vi.fn(),
 }));
 vi.mock("./services.js", () => ({
   createProject: vi.fn(),

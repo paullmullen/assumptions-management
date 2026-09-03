@@ -4,7 +4,7 @@ import reactHooks from "eslint-plugin-react-hooks";
 import reactRefresh from "eslint-plugin-react-refresh";
 
 export default [
-  { ignores: ["dist", "node_modules", ".firebase"] },
+  { ignores: ["dist", "**/node_modules/**", ".firebase"] },
   {
     files: ["**/*.{js,jsx}"],
     languageOptions: {
@@ -20,11 +20,11 @@ export default [
     },
   },
   {
-    files: ["tests/**/*.js"],
+    files: ["tests/**/*.js", "email-service/**/*.js"],
     languageOptions: { globals: { ...globals.node, ...globals.vitest } },
   },
   {
-    files: ["vite.config.js"],
+    files: ["vite.config.js", "scripts/*.mjs"],
     languageOptions: { globals: globals.node },
   },
   {

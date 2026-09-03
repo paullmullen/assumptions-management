@@ -11,10 +11,14 @@
     "format:check": "prettier --check .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "emulators": "firebase emulators:start --only auth,firestore",
+    "emulators": "firebase emulators:start --only auth,firestore,functions",
     "test:rules": "firebase emulators:exec --config firebase.rules-test.json --only firestore \"vitest run tests/rules\"",
     "deploy:development": "npm run build && firebase deploy --only hosting,firestore",
-    "check": "npm run format:check && npm run lint && npm run test && npm run build"
+    "check": "npm run format:check && npm run lint && npm run test && npm run build",
+    "test:email": "node scripts/run-email-emulators.mjs",
+    "deploy:email": "firebase deploy --only functions:auth-email",
+    "test:email-core": "firebase emulators:exec --project demo-auth-email-core --config firebase.email-core-test.json --only auth,firestore \"vitest run email-service/admin-integration.test.js --testTimeout 30000 --hookTimeout 30000\"",
+    "test:google": "firebase emulators:exec --project demo-google-auth --config firebase.google-test.json --only auth \"vitest run tests/auth --testTimeout 30000\""
   },
   "dependencies": {
     "@ant-design/icons": "^6.1.0",

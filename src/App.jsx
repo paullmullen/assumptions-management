@@ -6,6 +6,7 @@ import {
   Card,
   Checkbox,
   Empty,
+  Divider,
   Form,
   Input,
   Layout,
@@ -18,11 +19,11 @@ import {
 import {
   createUserWithEmailAndPassword,
   onAuthStateChanged,
-  sendEmailVerification,
-  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut,
 } from "firebase/auth";
+import GoogleAccountButton from "./GoogleAccountButton.jsx";
+import { continueWithGoogle } from "./googleAuth.js";
 import ProjectWorkspace from "./features/workspace/ProjectWorkspace.jsx";
 import DraftProvider from "./features/workspace/DraftProvider.jsx";
 import useProjectNavigation from "./features/workspace/useProjectNavigation.js";
@@ -43,6 +44,7 @@ import {
 import {
   refreshVerificationState,
   sendVerificationEmail,
+  requestPasswordResetEmail,
 } from "./verification.js";
 
 const { Header, Content } = Layout;
@@ -54,6 +56,17 @@ function AuthScreen() {
   const [form] = Form.useForm();
   const { message } = AntApp.useApp();
 
+  async function googleSignIn() {
+    setBusy(true);
+    try {
+      await continueWithGoogle();
+    } catch (error) {
+      message.error(authenticationErrorMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function submit(values) {
     setBusy(true);
     try {
@@ -64,16 +77,15 @@ function AuthScreen() {
           values.password,
         );
         await sendVerificationEmail(credential.user);
-        await ensureUserProfile(credential.user);
         message.success(
-          "Verification email sent. Verify your email, then sign in.",
+          "Verification email requested. Check your inbox, verify your email, then sign in.",
         );
         await signOut(auth);
         setMode("sign-in");
       } else if (mode === "reset") {
-        await sendPasswordResetEmail(auth, values.email);
+        await requestPasswordResetEmail(values.email);
         message.success(
-          "If an account exists, a password-reset email has been sent.",
+          "Request received. If an eligible account exists, check your inbox for password-reset instructions.",
         );
         setMode("sign-in");
       } else {
@@ -88,10 +100,13 @@ function AuthScreen() {
   }
 
   const copy = {
-    "sign-in": ["Sign in", "Use your verified email and password."],
+    "sign-in": [
+      "Sign in",
+      "Continue with Google, or use your email and password.",
+    ],
     "sign-up": [
       "Create your account",
-      "We will send a verification email before project access is available.",
+      "Use Google to get started, or create an account with email and password.",
     ],
     reset: [
       "Reset your password",
@@ -104,7 +119,20 @@ function AuthScreen() {
       <Card className="auth-card">
         <Title level={2}>Assumptions Management</Title>
         <Paragraph>{copy[1]}</Paragraph>
+        {mode !== "reset" && (
+          <>
+            <Button block type="primary" loading={busy} onClick={googleSignIn}>
+              Continue with Google
+            </Button>
+            <Paragraph type="secondary" style={{ marginTop: 12 }}>
+              Already have projects under another email? Sign in below first,
+              then choose Connect Google account to keep your projects.
+            </Paragraph>
+            <Divider>or use email</Divider>
+          </>
+        )}
         <Form
+          disabled={busy}
           form={form}
           layout="vertical"
           onFinish={submit}
@@ -130,27 +158,47 @@ function AuthScreen() {
               />
             </Form.Item>
           )}
-          <Button block htmlType="submit" loading={busy} type="primary">
+          <Button
+            block
+            htmlType="submit"
+            loading={busy}
+            type={mode === "reset" ? "primary" : "default"}
+          >
             {copy[0]}
           </Button>
         </Form>
         <Space className="auth-links" wrap>
           {mode !== "sign-in" && (
-            <Button type="link" onClick={() => setMode("sign-in")}>
+            <Button
+              disabled={busy}
+              type="link"
+              onClick={() => setMode("sign-in")}
+            >
               Sign in
             </Button>
           )}
           {mode !== "sign-up" && (
-            <Button type="link" onClick={() => setMode("sign-up")}>
+            <Button
+              disabled={busy}
+              type="link"
+              onClick={() => setMode("sign-up")}
+            >
               Create account
             </Button>
           )}
           {mode !== "reset" && (
-            <Button type="link" onClick={() => setMode("reset")}>
+            <Button
+              disabled={busy}
+              type="link"
+              onClick={() => setMode("reset")}
+            >
               Forgot password?
             </Button>
           )}
         </Space>
+        <Paragraph type="secondary">
+          Questions? <a href="mailto:mullenpaull@gmail.com">Contact Paul</a>
+        </Paragraph>
       </Card>
     </main>
   );
@@ -164,7 +212,9 @@ function VerificationScreen({ user }) {
     setBusy(true);
     try {
       await sendVerificationEmail(user);
-      message.success("A new verification email has been sent.");
+      message.success(
+        "Verification email requested. Check your inbox and junk folder.",
+      );
     } catch (error) {
       message.error(authenticationErrorMessage(error));
     } finally {
@@ -177,13 +227,14 @@ function VerificationScreen({ user }) {
       <Card className="auth-card">
         <Title level={2}>Verify your email</Title>
         <Paragraph>
-          Check your inbox for the Firebase verification link, then sign in
-          again. If it has not arrived, request another email below.
+          Check your inbox and junk folder for the verification email, then sign
+          in again. If it has not arrived, request another email below.
         </Paragraph>
         <Space wrap>
           <Button loading={busy} onClick={resend} type="primary">
             Resend verification email
           </Button>
+          <GoogleAccountButton user={user} />
           <Button onClick={() => signOut(auth)}>Sign out</Button>
         </Space>
       </Card>
@@ -191,7 +242,14 @@ function VerificationScreen({ user }) {
   );
 }
 
-function ProjectHeader({ projects, projectId, onSelect, onCreate, onSignOut }) {
+function ProjectHeader({
+  user,
+  projects,
+  projectId,
+  onSelect,
+  onCreate,
+  onSignOut,
+}) {
   return (
     <Header className="app-header">
       <Space className="header-content" size="middle" wrap>
@@ -208,6 +266,7 @@ function ProjectHeader({ projects, projectId, onSelect, onCreate, onSignOut }) {
           value={projectId}
         />
         <Button onClick={onCreate}>Create project</Button>
+        <GoogleAccountButton user={user} />
         <Button onClick={onSignOut}>Sign out</Button>
       </Space>
     </Header>
@@ -326,12 +385,24 @@ function Application() {
         return;
       }
 
-      const isVerified = await refreshVerificationState(nextUser);
-      if (current !== generation) return;
-      const refreshedUser = auth.currentUser;
-      setUser(refreshedUser);
-      setProjectsLoading(Boolean(isVerified && refreshedUser));
-      if (current === generation) setAuthLoading(false);
+      try {
+        const isVerified = await refreshVerificationState(nextUser);
+        if (current !== generation) return;
+        const refreshedUser = auth.currentUser;
+        if (refreshedUser) await ensureUserProfile(refreshedUser);
+        if (current !== generation) return;
+        setUser(refreshedUser);
+        setProjectsLoading(Boolean(isVerified && refreshedUser));
+      } catch {
+        if (current !== generation) return;
+        setUser(null);
+        setProjectsLoading(false);
+        message.error(
+          "Your account could not be loaded. Please try signing in again.",
+        );
+      } finally {
+        if (current === generation) setAuthLoading(false);
+      }
     });
     return () => {
       generation += 1;
@@ -426,6 +497,7 @@ function Application() {
   return (
     <Layout className="app-layout">
       <ProjectHeader
+        user={user}
         onCreate={() => routeTo("/projects/new")}
         onSelect={(id) => routeTo(`/projects/${id}`)}
         onSignOut={() => guard(() => signOut(auth))}

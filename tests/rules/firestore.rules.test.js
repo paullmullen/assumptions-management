@@ -2665,3 +2665,29 @@ describe("scored candidate adoption", () => {
     });
   });
 });
+
+it("keeps authentication email jobs and quota counters inaccessible to all browser clients", async () => {
+  await seedPrivateProject();
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), "authEmailJobs", "private"), {
+      email: "private@example.com",
+      status: "pending",
+    });
+    await setDoc(doc(context.firestore(), "authEmailLimits", "private"), {
+      count: 1,
+    });
+  });
+  for (const context of [
+    testEnv.unauthenticatedContext(),
+    verifiedContext(ownerId),
+    testEnv.authenticatedContext(ownerId, { email_verified: false }),
+  ]) {
+    for (const name of ["authEmailJobs", "authEmailLimits"]) {
+      const ref = doc(context.firestore(), name, "private");
+      await assertFails(getDoc(ref));
+      await assertFails(getDocs(collection(context.firestore(), name)));
+      await assertFails(setDoc(ref, { email: "forged@example.com" }));
+      await assertFails(deleteDoc(ref));
+    }
+  }
+});

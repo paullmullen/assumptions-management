@@ -1,7 +1,7 @@
 # Assumptions Management — next sprint plan
 
 Date: September 3, 2026  
-Status: Adopted plan of record on September 3, 2026. Slices 1A, 1B, 1C, 2A, and 2B are implemented. The user accepted 2A; [2B](Workspace-Slice-2B.md) awaits user acceptance. The user accepted the portfolio workspace through 1C; remaining cross-device/pilot acceptance stays open. See [Slice 2A](Workspace-Slice-2A.md) for the review preference. See [Slice 1C](Workspace-Slice-1C.md) for sorting and the agreed attention rule. See [Slice 1B](Workspace-Slice-1B.md) for verification and required rule deployment. See [Workspace design](Workspace-Design.md) and [Slice 1A](Workspace-Slice-1A.md).
+Status: Adopted plan of record on September 3, 2026. Slices 1A, 1B, 1C, 2A, and 2B are implemented. The user accepted 2A and [2B](Workspace-Slice-2B.md). The user accepted the portfolio workspace through 1C; remaining cross-device/pilot acceptance stays open. See [Slice 2A](Workspace-Slice-2A.md) for the review preference. See [Slice 1C](Workspace-Slice-1C.md) for sorting and the agreed attention rule. See [Slice 1B](Workspace-Slice-1B.md) for verification and required rule deployment. See [Workspace design](Workspace-Design.md) and [Slice 1A](Workspace-Slice-1A.md).
 
 ## Objective
 
@@ -16,6 +16,14 @@ Implemented: verified accounts, isolated projects, promises, active assumptions,
 The user has accepted candidate capture and adoption as sufficient for MVP. Merge/split, discard/entered-in-error, and broader candidate lifecycle extensions are deferred. The new requirement to score immediately during adoption is a refinement of the accepted workflow, not a reopening of the broader lifecycle.
 
 The September 2 source audit still calls candidate consolidation the next slice. This plan supersedes that recommendation. Previously delivered ZIPs are unchanged.
+
+## Priority update — Google sign-in before 2C
+
+The user chose **Continue with Google** to unblock testers without domain registration or SMTP2GO setup. Email/password remains available through Firebase's standard emails. Project contact is **mullenpaull@gmail.com**. Google sign-in and explicit account linking are implemented; provider setup, deployment, and real browser acceptance remain pending. See [Google sign-in](Google-Sign-In.md).
+
+The custom [authentication email implementation](Authentication-Email-Slice.md) is retained but deferred. Do not activate custom email delivery or deploy its Functions for this onboarding slice. No domain or SMTP2GO account is required for Google sign-in.
+
+Once Google onboarding is accepted, resume **2C — Guided experience**.
 
 ## Sprint goal 1 — Make the portfolio the primary workspace
 

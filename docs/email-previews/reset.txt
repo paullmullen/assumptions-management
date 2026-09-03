@@ -1,0 +1,14 @@
+Assumptions Management
+
+Choose a new password
+
+We received a request to reset the password for your Assumptions Management account.
+
+Reset my password:
+https://preview.example.invalid/__/auth/action?mode=resetPassword&oobCode=PREVIEW-ONLY-NOT-A-REAL-LINK
+
+After choosing a new password, return to Assumptions Management and sign in.
+
+If this link is expired or already used, request a new email from the app.
+
+If you did not request this, ignore this email. Your password will not change.
