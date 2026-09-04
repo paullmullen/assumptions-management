@@ -156,31 +156,104 @@ export async function updateAssumption(
   assumptionId,
   statement,
 ) {
-  const assumptionRef = doc(
-    db,
-    "projects",
-    projectId,
-    "assumptions",
-    assumptionId,
+  const snapshot = await getDoc(
+    doc(db, "projects", projectId, "assumptions", assumptionId),
   );
-
-  await updateDoc(assumptionRef, {
-    statement: statement.trim(),
-    updatedAt: serverTimestamp(),
-    updatedBy: user.uid,
-  });
+  if (!snapshot.exists()) throw new Error("This assumption is unavailable.");
+  const baseline = snapshot.data();
+  return saveAssumptionDraft(
+    user,
+    projectId,
+    assumptionId,
+    baseline,
+    { ...editableAssumption(baseline), statement },
+    null,
+  );
 }
 
-export async function saveProjectBrief(projectId, userId, promises) {
-  const briefRef = doc(db, "projects", projectId, "projectBrief", "overview");
+export function promiseValues(values = {}, trim = true) {
+  return Object.fromEntries(
+    ["customerPromise", "investorPromise", "coworkerPromise"].map((key) => [
+      key,
+      trim ? (values[key] ?? "").trim() : (values[key] ?? ""),
+    ]),
+  );
+}
 
-  await setDoc(briefRef, {
-    customerPromise: promises.customerPromise.trim(),
-    investorPromise: promises.investorPromise.trim(),
-    coworkerPromise: promises.coworkerPromise.trim(),
-    updatedAt: serverTimestamp(),
-    updatedBy: userId,
-  });
+export async function loadPromiseHistory(projectId) {
+  const snapshot = await getDocs(
+    collection(
+      db,
+      "projects",
+      projectId,
+      "projectBrief",
+      "overview",
+      "history",
+    ),
+  );
+  return snapshot.docs
+    .map((item) => ({ ...item.data(), id: item.id }))
+    .sort(
+      (a, b) =>
+        (b.createdAt?.toMillis() ?? 0) - (a.createdAt?.toMillis() ?? 0) ||
+        a.id.localeCompare(b.id),
+    );
+}
+
+export async function saveProjectBrief(projectId, user, promises, baseline) {
+  const reference = doc(db, "projects", projectId, "projectBrief", "overview");
+  const historyRef = doc(collection(reference, "history"));
+  const next = promiseValues(promises);
+  const expected = promiseValues(baseline, false);
+  function check(current) {
+    if (
+      Object.keys(expected).some(
+        (key) => expected[key] !== promiseValues(current, false)[key],
+      )
+    ) {
+      const error = new Error(
+        "The promises changed while you were editing. Review the latest saved promises before saving.",
+      );
+      error.code = "promise-conflict";
+      error.current = current;
+      throw error;
+    }
+  }
+  try {
+    return await runTransaction(db, async (transaction) => {
+      const snapshot = await transaction.get(reference);
+      const current = snapshot.exists() ? snapshot.data() : {};
+      check(current);
+      const before = promiseValues(current, false);
+      if (Object.keys(next).every((key) => next[key] === before[key]))
+        return current;
+      transaction.set(reference, {
+        ...next,
+        updatedBy: user.uid,
+        updatedAt: serverTimestamp(),
+        lastWordingChangeId: historyRef.id,
+      });
+      transaction.set(historyRef, {
+        from: before,
+        to: next,
+        createdBy: user.uid,
+        authorEmail: user.email,
+        createdAt: serverTimestamp(),
+      });
+      return { ...next, lastWordingChangeId: historyRef.id };
+    });
+  } catch (error) {
+    if (error.code === "permission-denied") {
+      let latest;
+      try {
+        latest = await getDocFromServer(reference);
+      } catch {
+        throw error;
+      }
+      check(latest.exists() ? latest.data() : {});
+    }
+    throw error;
+  }
 }
 
 export async function ensureUserProfile(user) {
@@ -347,11 +420,14 @@ export async function loadCandidates(projectId) {
 export async function addCandidates(user, projectId, text) {
   const statements = parseCandidates(text);
   const batch = writeBatch(db);
-  const records = statements.map((statement) => {
+  const capturedAt = Date.now();
+  const records = statements.map((statement, index) => {
     const ref = doc(collection(db, "projects", projectId, "candidates"));
     const record = {
       statement,
       status: "pending",
+      groupId: "ungrouped",
+      rank: capturedAt + index,
       createdBy: user.uid,
       authorEmail: user.email,
       createdAt: serverTimestamp(),
@@ -522,10 +598,19 @@ export async function saveAssumptionDraft(
       const managementChange =
         before.nextStep !== after.nextStep ||
         before.helpNeeded !== after.helpNeeded;
+      const wordingChange = !creating && before.statement !== after.statement;
       const record =
-        entry || scoreChange || managementChange
+        entry || scoreChange || managementChange || wordingChange
           ? {
               ...(entry ?? {}),
+              ...(wordingChange
+                ? {
+                    wordingChange: {
+                      from: before.statement,
+                      to: after.statement,
+                    },
+                  }
+                : {}),
               ...(scoreChange
                 ? {
                     scoreChange: {
@@ -560,6 +645,7 @@ export async function saveAssumptionDraft(
             }
           : null;
       const pointers = {
+        ...(wordingChange ? { lastWordingChangeId: insightRef.id } : {}),
         ...(scoreChange ? { lastScoreChangeId: insightRef.id } : {}),
         ...(managementChange ? { lastManagementChangeId: insightRef.id } : {}),
       };

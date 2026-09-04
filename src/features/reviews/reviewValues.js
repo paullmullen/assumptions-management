@@ -44,6 +44,6 @@ export function validateReview(review) {
   // Leave room for Firestore field overhead below its 1 MiB document limit.
   if (new TextEncoder().encode(JSON.stringify(review)).length > 800000)
     throw new Error(
-      "This review is too large to publish. Your working assumptions are unchanged.",
+      "This review is too large to save. Your working assumptions are unchanged.",
     );
 }

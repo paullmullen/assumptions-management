@@ -2,7 +2,7 @@
 
 ## Delivered workflow
 
-The project owner has a **Project access** card below the portfolio and reviews. Enter a person's email address, choose **Create invitation**, then copy and share the generated link. This release does not send invitation email automatically. The link is tied to that email; possession alone does not grant access.
+The project owner has a **Project access** card in **Settings & access**. Enter a person's email address, choose **Create invitation**, then copy and share the generated link. This release does not send invitation email automatically. The link is tied to that email; possession alone does not grant access.
 
 The recipient opens the link, signs in (or creates and verifies an account), and chooses **Accept invitation**. The invitation route survives sign-in and is not replaced by the automatic single-project redirect. The recipient sees the inviter and intended email before acceptance; project names, promises, assumptions, and reviews remain private until membership exists. A wrong-account or unavailable-link response does not expose invitation details.
 
@@ -41,7 +41,7 @@ Manual checks using two browser profiles and two verified accounts:
 
 1. As the owner, create an invitation for the second account and copy the link. Confirm the project access card explains that you must share the link.
 2. Open it signed out in the second profile. Sign in or register/verify. Confirm the invitation remains the destination. A different signed-in email must not see invitation or project details.
-3. Accept and verify the shared project opens. Add an assumption and an insight; publish a review. Reload the owner's project and verify those contributions and attribution.
+3. Accept and verify the shared project opens. Add an assumption and an insight; save a review. Reload the owner's project and verify those contributions and attribution.
 4. Refresh the owner's access card to see the member. Confirm the member has no membership administration controls.
 5. Revoke another pending invitation and verify it cannot be accepted. Verify an expired invitation does not offer acceptance.
 6. Remove the member while their project is open. Confirm project content closes and further access fails. Verify prior insights and reviews remain attributed to them.
@@ -52,4 +52,4 @@ Automated tests cover owner/recipient/nonmember boundaries, unverified access, e
 
 ## Remaining backlog
 
-This is a bounded invitation/shared-access slice, not completion of every original membership epic. Automatic invitation emails, invitation decline/inbox, multiple owners and ownership transfer remain future work. Guided setup, candidate lifecycle, notifications, and final pilot acceptance also remain. No ownership-transfer mechanism is silently implied by the existing `owner` role.
+This is a bounded invitation/shared-access slice, not completion of every original membership epic. Automatic invitation emails, invitation decline/inbox, multiple owners and ownership transfer remain future work. An optional invitation step in guided setup, broader candidate lifecycle, notifications, and final pilot acceptance also remain. No ownership-transfer mechanism is silently implied by the existing `owner` role.

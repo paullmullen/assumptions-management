@@ -1,0 +1,78 @@
+.candidate-board {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+.candidate-lane {
+  min-width: 0;
+  padding: 14px;
+  background: #eef3ef;
+  border: 1px solid #d6e1d8;
+  border-radius: 10px;
+  min-height: 180px;
+}
+.candidate-lane h4 {
+  margin-top: 0;
+  overflow-wrap: anywhere;
+}
+.candidate-lane h4 span {
+  font-weight: 400;
+  color: #536659;
+}
+.candidate-card {
+  background: #fff;
+  border: 1px solid #c8d7cb;
+  border-radius: 8px;
+  padding: 14px;
+  margin-top: 12px;
+  overflow-wrap: anywhere;
+}
+.candidate-card.selected {
+  border-color: #275844;
+  box-shadow: 0 0 0 1px #275844;
+}
+.candidate-card .candidate-row {
+  border: 0;
+  padding: 8px 0;
+  margin: 0;
+}
+.candidate-card .ant-checkbox-wrapper {
+  font-weight: 500;
+}
+.candidate-movement {
+  margin-top: 12px;
+}
+.candidate-movement .ant-select {
+  min-width: 140px;
+  max-width: 100%;
+}
+.candidate-empty {
+  color: #536659;
+}
+.candidate-origins {
+  margin: 12px 0;
+  overflow-wrap: anywhere;
+}
+.candidate-origins summary {
+  cursor: pointer;
+}
+.candidate-origins li {
+  margin-bottom: 12px;
+}
+.candidate-origins p {
+  margin-bottom: 3px;
+  white-space: pre-wrap;
+}
+.candidate-combine-source {
+  margin-bottom: 12px;
+  white-space: pre-wrap;
+}
+@media (max-width: 600px) {
+  .candidate-board {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .candidate-card button {
+    min-height: 40px;
+  }
+}

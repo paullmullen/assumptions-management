@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import {
   App as AntApp,
   Button,
+  Alert,
+  Collapse,
   Card,
   Form,
   Input,
@@ -11,26 +13,33 @@ import {
 import { useDraft } from "../workspace/draftContext.js";
 import { loadProjectBrief, saveProjectBrief } from "../../services.js";
 
+import PromiseHistory from "./PromiseHistory.jsx";
+import { promiseLabels } from "./promiseLabels.js";
+
 const { Paragraph } = Typography;
 
-export default function ProjectBriefCard({ projectId, userId, onIncomplete }) {
+export default function ProjectBriefCard({ projectId, user, onIncomplete }) {
   return (
     <ProjectBrief
       key={projectId}
       projectId={projectId}
-      userId={userId}
+      user={user}
       onIncomplete={onIncomplete}
     />
   );
 }
 
-function ProjectBrief({ projectId, userId, onIncomplete }) {
+function ProjectBrief({ projectId, user, onIncomplete }) {
   const { message } = AntApp.useApp();
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [form] = Form.useForm();
   const [saved, setSaved] = useState({});
   const [dirty, setDirty] = useState(false);
+  const [conflict, setConflict] = useState(null);
+  const [loadError, setLoadError] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [revision, setRevision] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -38,6 +47,7 @@ function ProjectBrief({ projectId, userId, onIncomplete }) {
     loadProjectBrief(projectId)
       .then((brief) => {
         if (active) {
+          setLoadError(false);
           form.setFieldsValue(brief);
           setSaved(brief);
           onIncomplete?.(
@@ -49,6 +59,7 @@ function ProjectBrief({ projectId, userId, onIncomplete }) {
       })
       .catch(() => {
         if (active) {
+          setLoadError(true);
           message.error("The project promises could not be loaded.");
         }
       })
@@ -61,15 +72,23 @@ function ProjectBrief({ projectId, userId, onIncomplete }) {
     return () => {
       active = false;
     };
-  }, [form, message, projectId, onIncomplete]);
+  }, [form, message, projectId, onIncomplete, loadAttempt]);
 
   async function submit(values) {
-    if (loading || busy) return false;
+    if (loading || busy || loadError || conflict) return false;
     setBusy(true);
 
     try {
-      await saveProjectBrief(projectId, userId, values);
-      setSaved(values);
+      await saveProjectBrief(projectId, user, values, saved);
+      const normalized = Object.fromEntries(
+        Object.keys(promiseLabels).map((key) => [
+          key,
+          (values[key] ?? "").trim(),
+        ]),
+      );
+      setSaved(normalized);
+      form.setFieldsValue(normalized);
+      setRevision((value) => value + 1);
       setDirty(false);
       onIncomplete?.(
         ["customerPromise", "investorPromise", "coworkerPromise"].some(
@@ -78,8 +97,9 @@ function ProjectBrief({ projectId, userId, onIncomplete }) {
       );
       message.success("Project promises saved.");
       return true;
-    } catch {
-      message.error("The project promises could not be saved.");
+    } catch (error) {
+      if (error.code === "promise-conflict") setConflict(error.current);
+      else message.error("The project promises could not be saved.");
       return false;
     } finally {
       setBusy(false);
@@ -93,10 +113,66 @@ function ProjectBrief({ projectId, userId, onIncomplete }) {
     discard: () => {
       form.setFieldsValue(saved);
       setDirty(false);
+      setConflict(null);
     },
   });
   return (
     <Card style={{ marginBottom: 24 }} title="The three promises">
+      {loadError && (
+        <Alert
+          type="error"
+          title="Promises could not be loaded. Editing is disabled until they can be loaded."
+          action={
+            <Button
+              onClick={() => {
+                setLoading(true);
+                setLoadAttempt((value) => value + 1);
+              }}
+            >
+              Retry promises
+            </Button>
+          }
+        />
+      )}
+      {conflict && (
+        <Alert
+          type="warning"
+          title="The promises changed while you were editing"
+          description={
+            <>
+              <Paragraph>
+                Your draft is retained. Review the latest saved promises below
+                before deciding what to keep.
+              </Paragraph>
+              {Object.entries(promiseLabels).map(([key, label]) => (
+                <Paragraph key={key} style={{ whiteSpace: "pre-wrap" }}>
+                  <strong>{label} — latest saved:</strong>{" "}
+                  {conflict[key] || "Not set"}
+                </Paragraph>
+              ))}
+              <Button
+                onClick={() => {
+                  setSaved(conflict);
+                  setConflict(null);
+                }}
+              >
+                I reviewed these — keep my draft
+              </Button>
+              <Button
+                onClick={() => {
+                  form.setFieldsValue(conflict);
+                  setSaved(conflict);
+                  setDirty(false);
+                  setConflict(null);
+                  setRevision((value) => value + 1);
+                }}
+              >
+                Use latest saved promises
+              </Button>
+            </>
+          }
+        />
+      )}
       <Spin spinning={loading}>
         <Paragraph>
           Describe the promises this project makes to its customer, investor,
@@ -106,7 +182,7 @@ function ProjectBrief({ projectId, userId, onIncomplete }) {
 
         <Form
           form={form}
-          disabled={loading || busy}
+          disabled={loading || busy || loadError}
           layout="vertical"
           onFinish={submit}
           onValuesChange={(_, values) =>
@@ -121,6 +197,7 @@ function ProjectBrief({ projectId, userId, onIncomplete }) {
           <Form.Item
             label="What promise are you making to the customer?"
             name="customerPromise"
+            extra="Keep it to one short sentence when possible. Long promises are shortened with an ellipsis in the brief; the full text is saved."
             rules={[{ max: 4000 }]}
           >
             <Input.TextArea
@@ -133,6 +210,7 @@ function ProjectBrief({ projectId, userId, onIncomplete }) {
           <Form.Item
             label="What promise are you making to the investor?"
             name="investorPromise"
+            extra="Keep it to one short sentence when possible. Long promises are shortened with an ellipsis in the brief; the full text is saved."
             rules={[{ max: 4000 }]}
           >
             <Input.TextArea
@@ -145,6 +223,7 @@ function ProjectBrief({ projectId, userId, onIncomplete }) {
           <Form.Item
             label="What promise are you making to your coworkers?"
             name="coworkerPromise"
+            extra="Keep it to one short sentence when possible. Long promises are shortened with an ellipsis in the brief; the full text is saved."
             rules={[{ max: 4000 }]}
           >
             <Input.TextArea
@@ -154,11 +233,28 @@ function ProjectBrief({ projectId, userId, onIncomplete }) {
             />
           </Form.Item>
 
-          <Button htmlType="submit" loading={busy} type="primary">
+          <Button
+            htmlType="submit"
+            loading={busy}
+            disabled={Boolean(conflict)}
+            type="primary"
+          >
             Save promises
           </Button>
         </Form>
       </Spin>
+      <Collapse
+        style={{ marginTop: 16 }}
+        items={[
+          {
+            key: "history",
+            label: "Promise wording history",
+            children: (
+              <PromiseHistory projectId={projectId} revision={revision} />
+            ),
+          },
+        ]}
+      />
     </Card>
   );
 }

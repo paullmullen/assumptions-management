@@ -221,38 +221,90 @@ service cloud.firestore {
       }
 
       match /projectBrief/{briefId} {
+        function promises(data) {
+          return {'customerPromise': data.get('customerPromise', ''), 'investorPromise': data.get('investorPromise', ''), 'coworkerPromise': data.get('coworkerPromise', '')};
+        }
+        function hasPromiseRecord() {
+          let recordPath = /databases/$(database)/documents/projects/$(projectId)/projectBrief/overview/history/$(request.resource.data.lastWordingChangeId);
+          let before = resource == null ? {} : resource.data;
+          let record = getAfter(recordPath).data;
+          return !exists(recordPath) && record.from == promises(before)
+            && record.to == promises(request.resource.data) && record.from != record.to
+            && record.createdBy == request.auth.uid && record.createdAt == request.time;
+        }
         allow read: if isActiveMember(projectId);
-        allow create, update: if isActiveMember(projectId)
-          && briefId == 'overview'
-          && request.resource.data.keys().hasOnly([
-            'customerPromise',
-            'investorPromise',
-            'coworkerPromise',
-            'updatedAt',
-            'updatedBy'
-          ])
-          && request.resource.data.keys().hasAll([
-            'customerPromise',
-            'investorPromise',
-            'coworkerPromise',
-            'updatedAt',
-            'updatedBy'
-          ])
-          && request.resource.data.customerPromise is string
-          && request.resource.data.customerPromise.size() <= 4000
-          && request.resource.data.investorPromise is string
-          && request.resource.data.investorPromise.size() <= 4000
-          && request.resource.data.coworkerPromise is string
-          && request.resource.data.coworkerPromise.size() <= 4000
-          && request.resource.data.updatedAt is timestamp
-          && request.resource.data.updatedBy == request.auth.uid;
+        allow create, update: if isActiveMember(projectId) && briefId == 'overview'
+          && request.resource.data.keys().hasOnly(['customerPromise','investorPromise','coworkerPromise','updatedBy','updatedAt','lastWordingChangeId'])
+          && request.resource.data.customerPromise is string && request.resource.data.customerPromise.size() <= 4000
+          && request.resource.data.investorPromise is string && request.resource.data.investorPromise.size() <= 4000
+          && request.resource.data.coworkerPromise is string && request.resource.data.coworkerPromise.size() <= 4000
+          && request.resource.data.updatedBy == request.auth.uid && request.resource.data.updatedAt == request.time
+          && request.resource.data.lastWordingChangeId is string && hasPromiseRecord();
         allow delete: if false;
+        match /history/{historyId} {
+          function validPromiseRecord() {
+            let parentPath = /databases/$(database)/documents/projects/$(projectId)/projectBrief/overview;
+            let before = exists(parentPath) ? get(parentPath).data : {};
+            let after = getAfter(parentPath).data;
+            return request.resource.data.from == promises(before)
+              && request.resource.data.to == promises(after)
+              && request.resource.data.from != request.resource.data.to
+              && after.lastWordingChangeId == historyId
+              && after.updatedBy == request.auth.uid && after.updatedAt == request.time;
+          }
+          allow read: if isActiveMember(projectId);
+          allow create: if isActiveMember(projectId) && briefId == 'overview'
+            && request.resource.data.keys().hasOnly(['from','to','createdBy','authorEmail','createdAt'])
+            && request.resource.data.createdBy == request.auth.uid
+            && request.resource.data.authorEmail == request.auth.token.email
+            && request.resource.data.createdAt == request.time && validPromiseRecord();
+          allow update, delete: if false;
+        }
       }
+
+match /candidateGroups/{groupId} {
+  allow read: if isActiveMember(projectId);
+  allow create: if isActiveMember(projectId) && groupId != 'ungrouped'
+    && request.resource.data.keys().hasOnly(['name','createdBy','authorEmail','createdAt'])
+    && request.resource.data.name is string && request.resource.data.name.matches('[\\s\\S]*[^\\s][\\s\\S]*')
+    && request.resource.data.name.size() <= 80
+    && request.resource.data.createdBy == request.auth.uid
+    && request.resource.data.authorEmail == request.auth.token.email
+    && request.resource.data.createdAt == request.time;
+  allow update, delete: if false;
+}
 
 match /candidates/{candidateId} {
   function validCandidate(data) {
     return data.statement is string && data.statement.matches('[\\s\\S]*[^\\s][\\s\\S]*')
       && data.statement.size() <= 2000;
+  }
+  function validPosition(data) {
+    return data.groupId is string && (data.groupId == 'ungrouped'
+      || exists(/databases/$(database)/documents/projects/$(projectId)/candidateGroups/$(data.groupId)))
+      && data.rank is number && data.rank >= -1000000000000000 && data.rank <= 1000000000000000;
+  }
+  function combinedSource(id) {
+    let source = getAfter(/databases/$(database)/documents/projects/$(projectId)/candidates/$(id)).data;
+    return id != candidateId && source.status == 'combined' && source.combinedInto == candidateId
+      && source.combinedBy == request.auth.uid && source.combinedAt == request.time;
+  }
+  function validCombination(data) {
+    let ids = data.sourceCandidateIds;
+    return ids is list && ids.size() >= 2 && ids.size() <= 8 && ids.toSet().size() == ids.size()
+      && combinedSource(ids[0]) && combinedSource(ids[1])
+      && (ids.size() < 3 || combinedSource(ids[2]))
+      && (ids.size() < 4 || combinedSource(ids[3]))
+      && (ids.size() < 5 || combinedSource(ids[4]))
+      && (ids.size() < 6 || combinedSource(ids[5]))
+      && (ids.size() < 7 || combinedSource(ids[6]))
+      && (ids.size() < 8 || combinedSource(ids[7]));
+  }
+  function matchingCombination() {
+    let path = /databases/$(database)/documents/projects/$(projectId)/candidates/$(request.resource.data.combinedInto);
+    let target = getAfter(path).data;
+    return !exists(path) && target.status == 'pending' && candidateId in target.sourceCandidateIds
+      && target.createdBy == request.auth.uid && target.createdAt == request.time;
   }
   function matchingAdoption() {
     let path = /databases/$(database)/documents/projects/$(projectId)/assumptions/$(candidateId);
@@ -265,7 +317,9 @@ match /candidates/{candidateId} {
   }
   allow read: if isActiveMember(projectId);
   allow create: if isActiveMember(projectId)
-    && request.resource.data.keys().hasOnly(['statement', 'status', 'createdBy', 'authorEmail', 'createdAt'])
+    && request.resource.data.keys().hasOnly(['statement', 'status', 'createdBy', 'authorEmail', 'createdAt','sourceCandidateIds','groupId','rank'])
+    && ((!('groupId' in request.resource.data) && !('rank' in request.resource.data)) || validPosition(request.resource.data))
+    && (!('sourceCandidateIds' in request.resource.data) || validCombination(request.resource.data))
     && validCandidate(request.resource.data)
     && request.resource.data.status == 'pending'
     && request.resource.data.createdBy == request.auth.uid
@@ -280,7 +334,13 @@ match /candidates/{candidateId} {
       && request.resource.data.status == 'adopted'
       && request.resource.data.adoptedBy == request.auth.uid
       && request.resource.data.adoptedAt == request.time
-      && matchingAdoption()));
+      && matchingAdoption())
+    || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['groupId','rank','updatedBy','updatedAt'])
+      && validPosition(request.resource.data) && request.resource.data.updatedBy == request.auth.uid
+      && request.resource.data.updatedAt == request.time)
+    || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','combinedInto','combinedBy','combinedAt'])
+      && request.resource.data.status == 'combined' && request.resource.data.combinedBy == request.auth.uid
+      && request.resource.data.combinedAt == request.time && matchingCombination()));
   allow delete: if false;
 }
 
@@ -357,6 +417,23 @@ match /assumptions/{assumptionId} {
       && getAfter(recordPath).data.managementChange.to == managementPair(request.resource.data);
   }
 
+  function validWordingChange(data, insightId) {
+    let parentPath = /databases/$(database)/documents/projects/$(projectId)/assumptions/$(assumptionId);
+    let before = get(parentPath).data;
+    let after = getAfter(parentPath).data;
+    return data.wordingChange.keys().hasOnly(['from', 'to'])
+      && data.wordingChange.from == before.statement && data.wordingChange.to == after.statement
+      && before.statement != after.statement && after.lastWordingChangeId == insightId
+      && after.updatedBy == request.auth.uid && after.updatedAt == request.time;
+  }
+  function hasWordingChangeRecord() {
+    let recordPath = /databases/$(database)/documents/projects/$(projectId)/assumptions/$(assumptionId)/insights/$(request.resource.data.lastWordingChangeId);
+    let record = getAfter(recordPath).data;
+    return !exists(recordPath) && record.wordingChange.from == resource.data.statement
+      && record.wordingChange.to == request.resource.data.statement
+      && record.createdBy == request.auth.uid && record.createdAt == request.time;
+  }
+
   function validManagementFields(data) {
     return (!('nextStep' in data) || (data.nextStep is string && data.nextStep.size() <= 4000))
       && (!('helpNeeded' in data) || (data.helpNeeded is string && data.helpNeeded.size() <= 4000));
@@ -365,12 +442,13 @@ match /assumptions/{assumptionId} {
     allow read: if isActiveMember(projectId);
     allow create: if isActiveMember(projectId)
       && existsAfter(/databases/$(database)/documents/projects/$(projectId)/assumptions/$(assumptionId))
-      && request.resource.data.keys().hasOnly(['description', 'createdBy', 'authorEmail', 'createdAt', 'sourceUrl', 'classification', 'scoreChange', 'managementChange'])
+      && request.resource.data.keys().hasOnly(['description', 'createdBy', 'authorEmail', 'createdAt', 'sourceUrl', 'classification', 'scoreChange', 'managementChange', 'wordingChange'])
       && request.resource.data.keys().hasAll(['createdBy', 'authorEmail', 'createdAt'])
       && (('description' in request.resource.data && request.resource.data.description is string
         && request.resource.data.description.matches('[\\s\\S]*[^\\s][\\s\\S]*')
         && request.resource.data.description.size() <= 4000)
-        || (!('description' in request.resource.data) && ('scoreChange' in request.resource.data || 'managementChange' in request.resource.data)))
+        || (!('description' in request.resource.data) && ('scoreChange' in request.resource.data || 'managementChange' in request.resource.data || 'wordingChange' in request.resource.data)))
+      && (!('wordingChange' in request.resource.data) || validWordingChange(request.resource.data, insightId))
       && (!('managementChange' in request.resource.data) || validManagementChange(request.resource.data, insightId))
       && (!('scoreChange' in request.resource.data) || validScoreChange(request.resource.data, insightId))
       && (!('sourceUrl' in request.resource.data) && !('classification' in request.resource.data)
@@ -430,7 +508,7 @@ match /assumptions/{assumptionId} {
       'lastScoreChangeId',
       'nextStep',
       'helpNeeded',
-      'lastManagementChangeId'
+      'lastManagementChangeId', 'lastWordingChangeId'
     ])
     && request.resource.data.keys().hasAll([
       'statement',
@@ -457,8 +535,11 @@ match /assumptions/{assumptionId} {
       'lastScoreChangeId',
       'nextStep',
       'helpNeeded',
-      'lastManagementChangeId'
+      'lastManagementChangeId', 'lastWordingChangeId'
     ])
+    && (request.resource.data.statement != resource.data.statement
+      ? hasWordingChangeRecord()
+      : !request.resource.data.diff(resource.data).affectedKeys().hasAny(['lastWordingChangeId']))
     && (request.resource.data.diff(resource.data).affectedKeys().hasAny(['criticality', 'evidence'])
       ? hasScoreChangeRecord()
       : !request.resource.data.diff(resource.data).affectedKeys().hasAny(['lastScoreChangeId']))

@@ -2,9 +2,9 @@
 
 Open **Guided start** beneath the project title. Direct editing remains available whether guidance is open or paused.
 
-The five steps explain the Three Promises, affirmative assumptions, a static blind-spot check, the two scoring axes and prioritization, and learning/formal reviews. Each step links to the relevant existing section and moves keyboard focus there. Previous/Next changes guidance only: it neither saves forms nor declares project work complete.
+The six steps explain the Three Promises, optional team invitations, affirmative assumptions, a static blind-spot check, the two scoring axes and prioritization, and learning/formal reviews. Each step links to the relevant existing section and moves keyboard focus there. Previous/Next changes guidance only: it neither saves forms nor declares project work complete.
 
-Progress is an optional browser preference keyed by account and project. Pause, reopen, or return later on the same browser to resume. Guidance can be revisited after finishing. Clearing browser storage resets it; another device starts fresh. Only the open state and step number are stored, not project content. If browser storage is blocked or malformed, the guide remains usable without persistence. Existing membership checks still control access to the project screen; no Firestore data, rules, backend, or production dependencies changed.
+Progress is an optional browser preference keyed by account and project. Pause, reopen, or return later on the same browser to resume. Guidance can be revisited after finishing. Clearing browser storage resets it; another device starts fresh. Only the open state, step number, and guide format version are stored, not project content. If browser storage is blocked or malformed, the guide remains usable without persistence. Existing membership checks still control access to the project screen; no Firestore data, rules, backend, or production dependencies changed.
 
 ## Manual acceptance
 
@@ -19,3 +19,5 @@ Progress is an optional browser preference keyed by account and project. Pause, 
 Automated component checks cover direct entry, pause/resume, reload, account/project separation, editor focus, finish/reopen, invalid preferences, and blocked storage writes. Unfamiliar-user and live browser acceptance remain manual gates.
 
 Deploy with the existing `npm.cmd run deploy:development` command after extracting the updated project. Keep local Firebase configuration in place.
+
+The invitation step opens existing owner-only controls in Settings & access; members are directed to ask the owner. Skip for now advances without sending or creating an invitation. Existing five-step progress is migrated to its matching step. See [Invitations and review movement](Invitations-and-Review-Movement.md).

@@ -50,6 +50,10 @@ export default function InsightsPanel({
       extra={<Typography.Text type="secondary">Newest first</Typography.Text>}
       style={{ gridColumn: "1 / -1" }}
     >
+      <Typography.Paragraph type="secondary">
+        Wording history begins with changes saved using this version; earlier
+        changes are not reconstructed.
+      </Typography.Paragraph>
       {loading ? (
         <Spin />
       ) : loadError ? (
@@ -83,6 +87,17 @@ export default function InsightsPanel({
             <Typography.Paragraph style={{ whiteSpace: "pre-wrap" }}>
               {item.description}
             </Typography.Paragraph>
+          )}
+          {item.wordingChange && (
+            <div>
+              <Typography.Text strong>Assumption wording</Typography.Text>
+              <Typography.Paragraph style={{ whiteSpace: "pre-wrap" }}>
+                Previously: {item.wordingChange.from}
+              </Typography.Paragraph>
+              <Typography.Paragraph style={{ whiteSpace: "pre-wrap" }}>
+                Now: {item.wordingChange.to}
+              </Typography.Paragraph>
+            </div>
           )}
           {item.scoreChange && (
             <Space orientation="vertical" size={0} style={{ marginBottom: 8 }}>

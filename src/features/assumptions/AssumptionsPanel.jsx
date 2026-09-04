@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Empty, Space, Spin, Tag, Typography } from "antd";
 import { loadAssumptions, loadInsights } from "../../services.js";
 import { useNavigationGuard } from "../workspace/draftContext.js";
-import PortfolioChart from "../portfolioChart/PortfolioChart.jsx";
+import ReviewMovementChart from "../portfolioChart/ReviewMovementChart.jsx";
 import CandidatesPanel from "../candidates/CandidatesPanel.jsx";
 import AssumptionDrawer from "./AssumptionDrawer.jsx";
 
@@ -39,6 +39,7 @@ function ProjectAssumptions({
 }) {
   const guard = useNavigationGuard();
   const [assumptions, setAssumptions] = useState([]);
+  const [portfolioLoadedAt, setPortfolioLoadedAt] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
@@ -97,6 +98,7 @@ function ProjectAssumptions({
       .then((items) => {
         if (active) {
           setAssumptions(items);
+          setPortfolioLoadedAt(Date.now());
           setError("");
         }
       })
@@ -319,7 +321,15 @@ function ProjectAssumptions({
             }
           />
         ) : (
-          <PortfolioChart
+          <ReviewMovementChart
+            projectId={projectId}
+            portfolioLoadedAt={portfolioLoadedAt}
+            onRefreshPortfolio={() =>
+              guard(() => {
+                setLoading(true);
+                setAttempt((value) => value + 1);
+              })
+            }
             assumptions={assumptions}
             selectedId={selectedId}
             onSelect={select}

@@ -421,3 +421,15 @@ it("failed recent-history loads show a retry instead of silently incomplete orde
   );
   await screen.findAllByText("Last change: Date unavailable");
 });
+
+vi.mock("../candidates/boardService.js", () => ({
+  loadCandidateGroups: vi.fn(async () => []),
+  newBoardId: vi.fn(),
+  saveCandidateGroup: vi.fn(),
+  combineCandidates: vi.fn(),
+  moveCandidate: vi.fn(),
+}));
+
+vi.mock("../reports/reportService.js", () => ({
+  loadReportReviews: vi.fn(async () => []),
+}));

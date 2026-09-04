@@ -41,6 +41,6 @@ Users who already signed up with the same Google email can use Firebase's normal
 - Invitation deep link remains in the URL during popup sign-in and is available after authentication; verify membership boundaries with a second account.
 - Check the popup on desktop and mobile browsers. If blocked, allow popups for this site and retry. This slice uses popup authentication, not redirect authentication.
 
-Automated checks: `npm run check`; `npm run test:google` tests linking different emails, retaining UID and verified sign-in, and rejecting credentials already used by another account against the Auth emulator. The emulator uses synthetic Google tokens and does not replace real OAuth/browser acceptance. Live Google consent, production provider setup, and browser acceptance remain pending.
+Automated checks: `npm run check`; `npm run test:google` tests linking different emails, retaining UID and verified sign-in, and rejecting credentials already used by another account against the Auth emulator. The emulator uses synthetic Google tokens and does not replace real OAuth/browser acceptance. The user enabled Google, reached the existing project, and confirmed both providers linked to the same account. This onboarding slice is accepted. Broader new-user and mobile-browser acceptance remains part of pilot readiness.
 
 References: [Firebase Google sign-in](https://firebase.google.com/docs/auth/web/google-signin), [account linking](https://firebase.google.com/docs/auth/web/account-linking).

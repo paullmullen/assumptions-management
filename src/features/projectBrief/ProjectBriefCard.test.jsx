@@ -23,7 +23,10 @@ const customer = () =>
   screen.getByLabelText("What promise are you making to the customer?");
 const app = (projectId = "a") => (
   <AntApp>
-    <ProjectBriefCard projectId={projectId} userId="owner" />
+    <ProjectBriefCard
+      projectId={projectId}
+      user={{ uid: "owner", email: "owner@example.com" }}
+    />
   </AntApp>
 );
 let errors;
@@ -70,7 +73,12 @@ it("keeps the form connected while loading and populates it without a useForm wa
   );
   fireEvent.click(screen.getByRole("button", { name: "Save promises" }));
   await waitFor(() =>
-    expect(saveProjectBrief).toHaveBeenCalledWith("a", "owner", promises),
+    expect(saveProjectBrief).toHaveBeenCalledWith(
+      "a",
+      { uid: "owner", email: "owner@example.com" },
+      promises,
+      promises,
+    ),
   );
 });
 
@@ -102,9 +110,54 @@ it("clears promises on project switch and ignores the previous project's late re
   await waitFor(() => expect(customer()).toHaveValue("Project B only"));
   fireEvent.click(screen.getByRole("button", { name: "Save promises" }));
   await waitFor(() =>
-    expect(saveProjectBrief).toHaveBeenCalledWith("b", "owner", {
-      ...promises,
-      customerPromise: "Project B only",
-    }),
+    expect(saveProjectBrief).toHaveBeenCalledWith(
+      "b",
+      { uid: "owner", email: "owner@example.com" },
+      {
+        ...promises,
+        customerPromise: "Project B only",
+      },
+      { ...promises, customerPromise: "Project B only" },
+    ),
   );
+});
+
+it("retains drafts on conflict and requires review before saving against the latest promises", async () => {
+  loadProjectBrief.mockResolvedValue(promises);
+  const latest = { ...promises, customerPromise: "Someone else's wording" };
+  saveProjectBrief.mockRejectedValueOnce({
+    code: "promise-conflict",
+    current: latest,
+  });
+  render(app());
+  await waitFor(() => expect(customer()).toHaveValue(promises.customerPromise));
+  fireEvent.change(customer(), { target: { value: "My revised promise" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save promises" }));
+  await screen.findByText("The promises changed while you were editing");
+  expect(customer()).toHaveValue("My revised promise");
+  expect(screen.getByRole("button", { name: "Save promises" })).toBeDisabled();
+  fireEvent.click(
+    screen.getByRole("button", { name: "I reviewed these — keep my draft" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Save promises" }));
+  await waitFor(() =>
+    expect(saveProjectBrief).toHaveBeenLastCalledWith(
+      "a",
+      { uid: "owner", email: "owner@example.com" },
+      { ...promises, customerPromise: "My revised promise" },
+      latest,
+    ),
+  );
+});
+
+it("blocks editing after a failed load and retries without treating unknown promises as blank", async () => {
+  loadProjectBrief
+    .mockRejectedValueOnce(new Error("offline"))
+    .mockResolvedValueOnce(promises);
+  render(app());
+  await screen.findByRole("button", { name: "Retry promises" });
+  expect(customer()).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Retry promises" }));
+  await waitFor(() => expect(customer()).toHaveValue(promises.customerPromise));
+  expect(customer()).toBeEnabled();
 });

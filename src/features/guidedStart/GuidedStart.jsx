@@ -1,5 +1,7 @@
-import { useState } from "react";
-import { Button, Card, Space, Typography } from "antd";
+import { useEffect, useRef, useState } from "react";
+import { Button, Card, Select, Space, Typography } from "antd";
+
+import { useNavigationGuard } from "../workspace/draftContext.js";
 
 const steps = [
   {
@@ -9,6 +11,14 @@ const steps = [
       "Ask: What are we promising, and to whom? These promises give the assumptions a shared purpose.",
     target: "project-promises",
     action: "Go to promises",
+  },
+  {
+    title: "Invite your team",
+    text: "Invite colleagues to work on this project. Open project access, enter their email address, create an invitation, then copy and share the link. Invitations are not emailed automatically.",
+    example:
+      "Use the email associated with their sign-in account. You can skip this step and invite people later from Settings & access.",
+    target: "project-settings",
+    action: "Invite team members",
   },
   {
     title: "Identify what must be true",
@@ -36,9 +46,9 @@ const steps = [
   },
   {
     title: "Record learning and review",
-    text: "Use the selected assumption’s editor to record new insights, next steps, and help needed. Insights can be saved without changing scores. When the team is ready, publish a formal review to preserve a snapshot and compare later changes.",
+    text: "Use the selected assumption’s editor to record new insights, next steps, and help needed. Insights can be saved without changing scores. When the team is ready, save a formal review to preserve a snapshot and compare later changes.",
     example:
-      "Choose a review rhythm that suits the project—even every two days. Publishing a review preserves saved work; it does not save unfinished edits in other forms.",
+      "Choose a review rhythm that suits the project—even every two days. Saving a review preserves saved work; it does not save unfinished edits in other forms.",
     target: "project-reviews",
     action: "Go to formal reviews",
   },
@@ -52,9 +62,17 @@ function readProgress(key) {
       typeof value.open === "boolean" &&
       Number.isInteger(value.step) &&
       value.step >= 0 &&
-      value.step < steps.length
+      value.step < (value.version === 2 ? steps.length : steps.length - 1)
     )
-      return value;
+      return {
+        ...value,
+        step:
+          value.version === 2
+            ? value.step
+            : value.step >= 1
+              ? value.step + 1
+              : value.step,
+      };
   } catch {
     /* Guidance also works when browser storage is unavailable. */
   }
@@ -66,37 +84,68 @@ export default function GuidedStart({
   userId,
   onNavigate,
   reviewsEnabled = true,
+  canInvite = false,
+  active,
+  onActiveChange,
 }) {
   return (
     <Guide
       key={`${userId}:${projectId}`}
+      active={active}
+      onActiveChange={onActiveChange}
       onNavigate={onNavigate}
+      canInvite={canInvite}
       reviewsEnabled={reviewsEnabled}
       storageKey={`assumptions-guide:${userId}:${projectId}`}
     />
   );
 }
 
-function Guide({ storageKey, onNavigate, reviewsEnabled }) {
+function Guide({
+  storageKey,
+  onNavigate,
+  reviewsEnabled,
+  canInvite,
+  active,
+  onActiveChange,
+}) {
+  const guard = useNavigationGuard();
+  const heading = useRef(null);
   const [progress, setProgress] = useState(() => readProgress(storageKey));
+  const open = active ?? progress.open;
+  useEffect(() => {
+    if (open) heading.current?.focus();
+  }, [open, progress.step]);
   const current =
-    !reviewsEnabled && progress.step === steps.length - 1
+    progress.step === 1 && !canInvite
       ? {
-          title: "Record learning",
-          text: "Use the selected assumption’s editor to record new insights, next steps, and help needed. Insights can be saved without changing scores; your history is retained.",
-          example:
-            "Formal reviews are optional. The project owner can enable snapshots later in Settings & access.",
-          target: "project-assumptions",
-          action: "Go to the portfolio",
+          ...steps[1],
+          text: "Only the project owner can invite team members. Ask the owner to create and share an invitation from Settings & access, or continue with setup.",
+          action: "View project access",
         }
-      : steps[progress.step];
+      : !reviewsEnabled && progress.step === steps.length - 1
+        ? {
+            title: "Record learning",
+            text: "Use the selected assumption’s editor to record new insights, next steps, and help needed. Insights can be saved without changing scores; your history is retained.",
+            example:
+              "Formal reviews are optional. The project owner can enable snapshots later in Settings & access.",
+            target: "project-assumptions",
+            action: "Go to the portfolio",
+          }
+        : steps[progress.step];
   function update(next) {
-    setProgress(next);
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(next));
-    } catch {
-      /* Optional preference only. */
-    }
+    guard(() => {
+      setProgress(next);
+      if (next.open !== open) onActiveChange?.(next.open);
+      try {
+        localStorage.setItem(
+          storageKey,
+          JSON.stringify({ ...next, version: 2 }),
+        );
+      } catch {
+        /* Optional preference only. */
+      }
+    });
   }
   function goToEditor() {
     if (onNavigate) {
@@ -107,25 +156,45 @@ function Guide({ storageKey, onNavigate, reviewsEnabled }) {
     target?.focus({ preventScroll: true });
     target?.scrollIntoView?.({ behavior: "smooth", block: "start" });
   }
+  if (!open)
+    return (
+      <Button
+        className="guided-start-launch"
+        onClick={() => update({ ...progress, open: true })}
+      >
+        Open guided start
+      </Button>
+    );
   return (
-    <Card className="guided-start" size="small">
+    <Card className="guided-start" id="project-guide" size="small">
       <Space wrap>
-        <Typography.Text strong>New to the method?</Typography.Text>
+        <Typography.Text strong>Guided start</Typography.Text>
         <Button
-          aria-expanded={progress.open}
+          aria-expanded={open}
           aria-controls="guided-start-content"
-          onClick={() => update({ ...progress, open: !progress.open })}
+          onClick={() => update({ ...progress, open: !open })}
         >
-          {progress.open ? "Pause guidance" : "Open guided start"}
+          {open ? "Pause guidance" : "Open guided start"}
         </Button>
         <Typography.Text type="secondary">
           Optional guidance; edit directly at any time.
         </Typography.Text>
       </Space>
-      {progress.open && (
+      {open && (
         <div id="guided-start-content">
+          <label htmlFor="guide-step">Choose a step</label>
+          <Select
+            id="guide-step"
+            className="guide-step-select"
+            value={progress.step}
+            options={steps.map((step, index) => ({
+              value: index,
+              label: `${index + 1}. ${!reviewsEnabled && index === steps.length - 1 ? "Record learning" : step.title}`,
+            }))}
+            onChange={(step) => update({ open: true, step })}
+          />
           <div aria-live="polite" aria-atomic="true">
-            <Typography.Title level={3}>
+            <Typography.Title ref={heading} tabIndex={-1} level={2}>
               {progress.step + 1} of {steps.length}: {current.title}
             </Typography.Title>
             <Typography.Paragraph>{current.text}</Typography.Paragraph>
@@ -143,6 +212,11 @@ function Guide({ storageKey, onNavigate, reviewsEnabled }) {
             >
               Previous
             </Button>
+            {progress.step === 1 && (
+              <Button onClick={() => update({ open: true, step: 2 })}>
+                Skip for now
+              </Button>
+            )}
             {progress.step < steps.length - 1 ? (
               <Button
                 onClick={() => update({ open: true, step: progress.step + 1 })}
@@ -159,8 +233,9 @@ function Guide({ storageKey, onNavigate, reviewsEnabled }) {
             type="secondary"
             style={{ marginTop: 12, marginBottom: 0 }}
           >
-            Your place is remembered on this browser. Save changes in the
-            relevant editor before leaving the project.
+            Your place is remembered on this browser. Open the editor to do the
+            work, then return with Open guided start. Next and Finish guidance
+            only move the guide; they do not save or mark project work complete.
           </Typography.Paragraph>
         </div>
       )}

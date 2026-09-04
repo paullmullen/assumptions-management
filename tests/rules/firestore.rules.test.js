@@ -1,3 +1,9 @@
+import {
+  loadReportSource,
+  loadReportComparison,
+  loadReportReviews,
+  verifyReportAccess,
+} from "../../src/features/reports/reportService.js";
 import { captureReview } from "../../src/features/reviews/reviewService.js";
 import { readFileSync } from "node:fs";
 import {
@@ -29,6 +35,9 @@ import {
 
 import {
   updateAssumptionScores,
+  updateAssumption,
+  saveProjectBrief,
+  loadPromiseHistory,
   saveAssumptionChanges,
   saveAssumptionDraft,
   addInsight,
@@ -294,13 +303,27 @@ describe("Slice 1 Firestore security rules", () => {
       "overview",
     );
 
-    await assertSucceeds(setDoc(briefRef, projectBrief()));
+    serviceDb = testEnv
+      .authenticatedContext(ownerId, {
+        email_verified: true,
+        email: "owner@example.com",
+      })
+      .firestore();
+    const actor = { uid: ownerId, email: "owner@example.com" };
     await assertSucceeds(
-      setDoc(briefRef, {
-        ...projectBrief(),
-        customerPromise:
-          "Customers will complete the process more confidently.",
-      }),
+      saveProjectBrief(projectId, actor, projectBrief(), {}),
+    );
+    await assertSucceeds(
+      saveProjectBrief(
+        projectId,
+        actor,
+        {
+          ...projectBrief(),
+          customerPromise:
+            "Customers will complete the process more confidently.",
+        },
+        projectBrief(),
+      ),
     );
     await assertSucceeds(getDoc(briefRef));
   });
@@ -378,12 +401,19 @@ describe("Slice 1 Firestore security rules", () => {
       }),
     );
 
+    serviceDb = testEnv
+      .authenticatedContext(ownerId, {
+        email_verified: true,
+        email: "owner@example.com",
+      })
+      .firestore();
     await assertSucceeds(
-      updateDoc(assumptionRef, {
-        statement: "Customers will complete the workflow without assistance.",
-        updatedAt: Timestamp.now(),
-        updatedBy: ownerId,
-      }),
+      updateAssumption(
+        { uid: ownerId, email: "owner@example.com" },
+        projectId,
+        "editable-assumption",
+        "Customers will complete the workflow without assistance.",
+      ),
     );
 
     const snapshot = await getDoc(assumptionRef);
@@ -1330,7 +1360,7 @@ describe("formal review publication", () => {
         ...payload,
         notes: "Changed after uncertain response",
       }),
-    ).rejects.toThrow("already published");
+    ).rejects.toThrow("already saved");
     expect(reviews).toHaveLength(1);
     expect(reviews[0].publishedAt.toMillis()).toBeGreaterThan(0);
   });
@@ -1837,11 +1867,12 @@ describe("Candidate capture and adoption", () => {
       }),
     );
     await assertSucceeds(
-      updateDoc(activeRef(added[0].id), {
-        statement: "Refined active statement.",
-        updatedBy: ownerId,
-        updatedAt: serverTimestamp(),
-      }),
+      updateAssumption(
+        actor,
+        projectId,
+        added[0].id,
+        "Refined active statement.",
+      ),
     );
     await assertSucceeds(
       updateAssumptionScores(actor, projectId, added[0].id, {
@@ -2181,11 +2212,7 @@ describe("Unified assumption drawer saves", () => {
     ).toBe(1);
   });
   it("checks latest wording even for an insight-only save", async () => {
-    await updateDoc(doc(serviceDb, parent), {
-      statement: "A revised assumption.",
-      updatedBy: ownerId,
-      updatedAt: serverTimestamp(),
-    });
+    await updateAssumption(user, projectId, "drawer", "A revised assumption.");
     await expect(
       saveAssumptionDraft(user, projectId, "drawer", initial, initial, {
         description: "Learning",
@@ -2196,7 +2223,7 @@ describe("Unified assumption drawer saves", () => {
     });
     expect(
       (await getDocs(collection(serviceDb, parent, "insights"))).size,
-    ).toBe(0);
+    ).toBe(1);
   });
   it("preserves concurrent changes to untouched fields and creates no no-op history", async () => {
     await saveAssumptionChanges(user, projectId, "drawer", null, null, {
@@ -2690,4 +2717,550 @@ it("keeps authentication email jobs and quota counters inaccessible to all brows
       await assertFails(deleteDoc(ref));
     }
   }
+});
+
+describe("Immutable wording and promise history", () => {
+  const actor = { uid: ownerId, email: "owner@example.com" };
+  const briefPath = `projects/${projectId}/projectBrief/overview`;
+  const assumptionPath = `projects/${projectId}/assumptions/wording`;
+  const values = {
+    customerPromise: "Value",
+    investorPromise: "Return",
+    coworkerPromise: "Culture",
+  };
+  beforeEach(async () => {
+    await seedPrivateProject();
+    serviceDb = testEnv
+      .authenticatedContext(ownerId, {
+        email_verified: true,
+        email: actor.email,
+      })
+      .firestore();
+    await setDoc(doc(serviceDb, assumptionPath), {
+      statement: "Original statement",
+      createdBy: ownerId,
+      createdAt: Timestamp.now(),
+    });
+  });
+  it("appends exact consecutive wording changes and does not record a no-op", async () => {
+    let baseline = (await getDoc(doc(serviceDb, assumptionPath))).data();
+    for (const statement of ["Second statement", "Third statement"]) {
+      const result = await saveAssumptionDraft(
+        actor,
+        projectId,
+        "wording",
+        baseline,
+        { ...baseline, statement },
+        {},
+      );
+      expect(result.insight.wordingChange).toEqual({
+        from: baseline.statement,
+        to: statement,
+      });
+      baseline = result.assumption;
+    }
+    await saveAssumptionDraft(
+      actor,
+      projectId,
+      "wording",
+      baseline,
+      { ...baseline, statement: " Third statement " },
+      {},
+    );
+    const records = await getDocs(
+      collection(serviceDb, assumptionPath, "insights"),
+    );
+    expect(records.size).toBe(2);
+    await assertFails(
+      updateDoc(records.docs[0].ref, {
+        wordingChange: { from: "Fake", to: "Fake" },
+      }),
+    );
+    await assertFails(deleteDoc(records.docs[0].ref));
+    await assertFails(
+      updateDoc(doc(serviceDb, assumptionPath), {
+        statement: "Bypass",
+        updatedBy: ownerId,
+        updatedAt: serverTimestamp(),
+      }),
+    );
+  });
+  it("rejects fabricated wording history atomically", async () => {
+    const batch = writeBatch(serviceDb);
+    batch.update(doc(serviceDb, assumptionPath), {
+      statement: "New text",
+      lastWordingChangeId: "fake",
+      updatedBy: ownerId,
+      updatedAt: serverTimestamp(),
+    });
+    batch.set(doc(serviceDb, assumptionPath, "insights", "fake"), {
+      wordingChange: { from: "Not the original", to: "New text" },
+      createdBy: ownerId,
+      authorEmail: actor.email,
+      createdAt: serverTimestamp(),
+    });
+    await assertFails(batch.commit());
+    expect(
+      (await getDoc(doc(serviceDb, assumptionPath))).data().statement,
+    ).toBe("Original statement");
+    expect(
+      (await getDocs(collection(serviceDb, assumptionPath, "insights"))).size,
+    ).toBe(0);
+  });
+  it("records initial and revised promises, including clearing, with no no-op record", async () => {
+    await saveProjectBrief(projectId, actor, values, {});
+    const next = {
+      ...values,
+      customerPromise: "",
+      investorPromise: " Better return ",
+    };
+    await saveProjectBrief(projectId, actor, next, values);
+    const normalized = { ...next, investorPromise: "Better return" };
+    await saveProjectBrief(projectId, actor, normalized, normalized);
+    const records = await loadPromiseHistory(projectId);
+    expect(records).toHaveLength(2);
+    expect(records[0]).toMatchObject({
+      from: values,
+      to: normalized,
+      authorEmail: actor.email,
+      createdBy: ownerId,
+    });
+    expect(records[0].createdAt).toBeInstanceOf(Timestamp);
+    await assertFails(
+      updateDoc(doc(serviceDb, briefPath), {
+        ...values,
+        updatedBy: ownerId,
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    const historyRef = doc(serviceDb, briefPath, "history", records[0].id);
+    await assertFails(
+      updateDoc(historyRef, { authorEmail: "forged@example.com" }),
+    );
+    await assertFails(deleteDoc(historyRef));
+  });
+  it("rejects stale promise edits and permits only one concurrent save", async () => {
+    await saveProjectBrief(projectId, actor, values, {});
+    const results = await Promise.allSettled([
+      saveProjectBrief(
+        projectId,
+        actor,
+        { ...values, customerPromise: "First" },
+        values,
+      ),
+      saveProjectBrief(
+        projectId,
+        actor,
+        { ...values, customerPromise: "Second" },
+        values,
+      ),
+    ]);
+    expect(
+      results.filter((result) => result.status === "fulfilled"),
+    ).toHaveLength(1);
+    expect(
+      results.find((result) => result.status === "rejected").reason.code,
+    ).toBe("promise-conflict");
+    expect(await loadPromiseHistory(projectId)).toHaveLength(2);
+  });
+  it("denies fabricated, orphan, and falsely attributed promise events", async () => {
+    for (const override of [
+      { from: { ...values, customerPromise: "Fake" } },
+      { authorEmail: "forged@example.com" },
+      { createdBy: otherUserId },
+    ]) {
+      const batch = writeBatch(serviceDb);
+      batch.set(doc(serviceDb, briefPath), {
+        ...values,
+        updatedBy: ownerId,
+        updatedAt: serverTimestamp(),
+        lastWordingChangeId: "forged",
+      });
+      batch.set(doc(serviceDb, briefPath, "history", "forged"), {
+        from: { customerPromise: "", investorPromise: "", coworkerPromise: "" },
+        to: values,
+        createdBy: ownerId,
+        authorEmail: actor.email,
+        createdAt: serverTimestamp(),
+        ...override,
+      });
+      await assertFails(batch.commit());
+    }
+    await assertFails(
+      setDoc(doc(serviceDb, briefPath, "history", "orphan"), {
+        from: {},
+        to: values,
+        createdBy: ownerId,
+        authorEmail: actor.email,
+        createdAt: serverTimestamp(),
+      }),
+    );
+    expect((await getDoc(doc(serviceDb, briefPath))).exists()).toBe(false);
+  });
+  it("keeps history private and available with formal reviews off", async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(doc(context.firestore(), `projects/${projectId}`), {
+        formalReviewsEnabled: false,
+      });
+    });
+    await saveProjectBrief(projectId, actor, values, {});
+    await updateAssumption(actor, projectId, "wording", "Revised");
+    expect(await loadPromiseHistory(projectId)).toHaveLength(1);
+    const outsider = verifiedContext(otherUserId).firestore();
+    await assertFails(getDocs(collection(outsider, briefPath, "history")));
+    await assertFails(
+      getDocs(collection(outsider, assumptionPath, "insights")),
+    );
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(
+        doc(
+          context.firestore(),
+          `users/${ownerId}/projectMemberships/${projectId}`,
+        ),
+        { active: false },
+      );
+    });
+    await assertFails(loadPromiseHistory(projectId));
+    await assertFails(
+      getDocs(collection(serviceDb, assumptionPath, "insights")),
+    );
+  });
+});
+
+describe("Project brief access and report sources", () => {
+  beforeEach(async () => {
+    await seedPrivateProject();
+    serviceDb = verifiedContext(ownerId).firestore();
+  });
+  it("loads current state and preserves published content with reviews disabled", async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await updateDoc(doc(db, "projects", projectId), {
+        formalReviewsEnabled: false,
+      });
+      await setDoc(doc(db, "projects", projectId, "reviews", "r"), {
+        title: "Historical review",
+        publishedAt: Timestamp.now(),
+        capturedAt: 1000,
+        promises: { customerPromise: "Then" },
+        assumptions: [
+          { id: "a", statement: "Historical wording", insights: [] },
+        ],
+      });
+      await setDoc(doc(db, "projects", projectId, "assumptions", "a"), {
+        statement: "Today's wording",
+      });
+    });
+    const current = await loadReportSource(projectId);
+    expect(current.assumptions[0].statement).toBe("Today's wording");
+    const comparison = await loadReportComparison(
+      projectId,
+      current,
+      await loadReportReviews(projectId),
+    );
+    expect(comparison.wordingChanged).toBe(1);
+    expect(comparison.newInsights).toBe(0);
+    const historical = await loadReportSource(projectId, "r");
+    expect(historical.assumptions[0].statement).toBe("Historical wording");
+    expect(historical.assumptions[0]).not.toHaveProperty("nextStep");
+  });
+  it("denies report loading and print access checks for outsiders and removed members", async () => {
+    serviceDb = verifiedContext(otherUserId).firestore();
+    await assertFails(loadReportSource(projectId));
+    await assertFails(verifyReportAccess(projectId));
+    await assertFails(
+      loadReportComparison(
+        projectId,
+        { kind: "current", assumptions: [{ id: "a" }] },
+        [
+          {
+            id: "r",
+            publishedAt: Timestamp.now(),
+            capturedAt: 1,
+            assumptions: [],
+          },
+        ],
+      ),
+    );
+    serviceDb = verifiedContext(ownerId).firestore();
+    await assertSucceeds(verifyReportAccess(projectId));
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(
+        doc(
+          context.firestore(),
+          "users",
+          ownerId,
+          "projectMemberships",
+          projectId,
+        ),
+        { active: false },
+      );
+    });
+    await assertFails(loadReportSource(projectId));
+    await assertFails(verifyReportAccess(projectId));
+    await assertFails(
+      loadReportComparison(
+        projectId,
+        { kind: "current", assumptions: [{ id: "a" }] },
+        [
+          {
+            id: "r",
+            publishedAt: Timestamp.now(),
+            capturedAt: 1,
+            assumptions: [],
+          },
+        ],
+      ),
+    );
+  });
+});
+
+describe("Candidate grouping and atomic combination", () => {
+  const actor = { uid: ownerId, email: "owner@example.com" };
+  const candidate = (id) =>
+    doc(serviceDb, "projects", projectId, "candidates", id);
+  beforeEach(async () => {
+    await seedPrivateProject();
+    serviceDb = testEnv
+      .authenticatedContext(ownerId, {
+        email_verified: true,
+        email: actor.email,
+      })
+      .firestore();
+  });
+  it("saves groups, reorders legacy cards with tied positions, combines eight sources, and adopts the result", async () => {
+    const {
+      saveCandidateGroup,
+      moveCandidate,
+      combineCandidates,
+      loadCandidateGroups,
+    } = await import("../../src/features/candidates/boardService.js");
+    await saveCandidateGroup(actor, projectId, "g", "Delivery");
+    expect((await loadCandidateGroups(projectId))[0].name).toBe("Delivery");
+    await saveCandidateGroup(actor, projectId, "g", "Delivery");
+    const rows = await addCandidates(
+      actor,
+      projectId,
+      Array.from({ length: 8 }, (_, i) => `Idea ${i}`).join("\n"),
+    );
+    const moved = await moveCandidate(actor, projectId, rows[0], "g", [
+      rows[0],
+    ]);
+    expect((await getDoc(candidate(rows[0].id))).data().groupId).toBe("g");
+    const sources = [moved[0], ...rows.slice(1)];
+    const combined = await combineCandidates(
+      actor,
+      projectId,
+      "combined",
+      sources,
+      "We can deliver.",
+    );
+    expect(combined.sourceCandidateIds).toHaveLength(8);
+    expect(combined.groupId).toBe("g");
+    for (const row of rows) {
+      const saved = (await getDoc(candidate(row.id))).data();
+      expect(saved.status).toBe("combined");
+      expect(saved.statement).toBe(row.statement);
+      await assertFails(
+        updateDoc(candidate(row.id), {
+          statement: "Erased",
+          updatedBy: ownerId,
+          updatedAt: serverTimestamp(),
+        }),
+      );
+    }
+    await combineCandidates(
+      actor,
+      projectId,
+      "combined",
+      sources,
+      "We can deliver.",
+    );
+    expect(await loadCandidates(projectId)).toHaveLength(9);
+    await adoptCandidate(actor, projectId, combined.id, combined.statement);
+    expect((await loadAssumptions(projectId))[0].sourceCandidateId).toBe(
+      "combined",
+    );
+    await expect(
+      moveCandidate(actor, projectId, combined, "ungrouped", [combined]),
+    ).rejects.toThrow(/no longer pending/);
+    await assertFails(
+      updateDoc(candidate(combined.id), {
+        groupId: "ungrouped",
+        rank: 1024,
+        updatedBy: ownerId,
+        updatedAt: serverTimestamp(),
+      }),
+    );
+  });
+  it("rejects a changed source without partial writes and permits only one competing combination", async () => {
+    const { combineCandidates } =
+      await import("../../src/features/candidates/boardService.js");
+    const rows = await addCandidates(actor, projectId, "First\nSecond");
+    await editCandidate(actor, projectId, rows[0].id, "Revised");
+    await expect(
+      combineCandidates(actor, projectId, "stale", rows, "Combined"),
+    ).rejects.toThrow(/changed/);
+    expect((await getDoc(candidate("stale"))).exists()).toBe(false);
+    expect((await getDoc(candidate(rows[1].id))).data().status).toBe("pending");
+    const current = await loadCandidates(projectId);
+    const results = await Promise.allSettled([
+      combineCandidates(actor, projectId, "one", current, "One"),
+      combineCandidates(actor, projectId, "two", current, "Two"),
+    ]);
+    expect(
+      results.filter((result) => result.status === "fulfilled"),
+    ).toHaveLength(1);
+    expect(
+      (await loadCandidates(projectId)).filter(
+        (row) => row.status === "pending",
+      ),
+    ).toHaveLength(1);
+  });
+  it("denies forged sources, unilateral retirement, reuse of a saved target, and metadata tampering", async () => {
+    const { combineCandidates } =
+      await import("../../src/features/candidates/boardService.js");
+    const rows = await addCandidates(actor, projectId, "First\nSecond\nThird");
+    const raw = {
+      statement: "Forged",
+      status: "pending",
+      createdBy: ownerId,
+      authorEmail: actor.email,
+      createdAt: serverTimestamp(),
+      sourceCandidateIds: [rows[0].id, rows[1].id],
+    };
+    await assertFails(setDoc(candidate("forged"), raw));
+    await assertFails(
+      updateDoc(candidate(rows[0].id), {
+        status: "combined",
+        combinedInto: "missing",
+        combinedBy: ownerId,
+        combinedAt: serverTimestamp(),
+      }),
+    );
+    await combineCandidates(
+      actor,
+      projectId,
+      "real",
+      rows.slice(0, 2),
+      "Combined",
+    );
+    await assertFails(
+      updateDoc(candidate(rows[2].id), {
+        status: "combined",
+        combinedInto: "real",
+        combinedBy: ownerId,
+        combinedAt: serverTimestamp(),
+      }),
+    );
+    await assertFails(
+      updateDoc(candidate("real"), { sourceCandidateIds: [rows[2].id] }),
+    );
+    await assertFails(deleteDoc(candidate(rows[0].id)));
+    await assertFails(
+      updateDoc(candidate(rows[2].id), {
+        groupId: "missing",
+        rank: 1,
+        updatedBy: ownerId,
+        updatedAt: serverTimestamp(),
+      }),
+    );
+  });
+  it("preserves nested combination provenance and detects stale movement", async () => {
+    const { combineCandidates, moveCandidate } =
+      await import("../../src/features/candidates/boardService.js");
+    const rows = await addCandidates(actor, projectId, "First\nSecond\nThird");
+    const first = await combineCandidates(
+      actor,
+      projectId,
+      "parent",
+      rows.slice(0, 2),
+      "Parent",
+    );
+    await combineCandidates(
+      actor,
+      projectId,
+      "child",
+      [first, rows[2]],
+      "Child",
+    );
+    expect(
+      (await getDoc(candidate("parent"))).data().sourceCandidateIds,
+    ).toEqual(rows.slice(0, 2).map((row) => row.id));
+    const extra = await addCandidates(actor, projectId, "Fourth\nFifth");
+    const current = await moveCandidate(
+      actor,
+      projectId,
+      extra[0],
+      "ungrouped",
+      extra,
+    );
+    await moveCandidate(actor, projectId, current[1], "ungrouped", [
+      current[1],
+      current[0],
+    ]);
+    await expect(
+      moveCandidate(actor, projectId, current[0], "ungrouped", current),
+    ).rejects.toThrow(/Someone moved/);
+  });
+  it("denies group and candidate changes for outsiders and removed members", async () => {
+    const {
+      saveCandidateGroup,
+      loadCandidateGroups,
+      combineCandidates,
+      moveCandidate,
+    } = await import("../../src/features/candidates/boardService.js");
+    const rows = await addCandidates(actor, projectId, "First\nSecond");
+    await saveCandidateGroup(actor, projectId, "g", "Group");
+    serviceDb = verifiedContext(otherUserId).firestore();
+    await assertFails(loadCandidateGroups(projectId));
+    await assertFails(
+      saveCandidateGroup(
+        { uid: otherUserId, email: "other@example.com" },
+        projectId,
+        "bad",
+        "Bad",
+      ),
+    );
+    await assertFails(
+      combineCandidates(
+        { uid: otherUserId, email: "other@example.com" },
+        projectId,
+        "bad-combine",
+        rows,
+        "Bad",
+      ),
+    );
+    await assertFails(
+      moveCandidate(
+        { uid: otherUserId, email: "other@example.com" },
+        projectId,
+        rows[0],
+        "g",
+        [rows[0]],
+      ),
+    );
+    await testEnv.withSecurityRulesDisabled(async (context) =>
+      updateDoc(
+        doc(
+          context.firestore(),
+          "users",
+          ownerId,
+          "projectMemberships",
+          projectId,
+        ),
+        { active: false },
+      ),
+    );
+    serviceDb = testEnv
+      .authenticatedContext(ownerId, {
+        email_verified: true,
+        email: actor.email,
+      })
+      .firestore();
+    await assertFails(loadCandidateGroups(projectId));
+    await assertFails(
+      combineCandidates(actor, projectId, "removed", rows, "Removed"),
+    );
+  });
 });

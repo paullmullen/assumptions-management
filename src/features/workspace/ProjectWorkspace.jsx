@@ -5,6 +5,7 @@ import ProjectBriefCard from "../projectBrief/ProjectBriefCard.jsx";
 import ReviewsPanel from "../reviews/ReviewsPanel.jsx";
 import MembersPanel from "../members/MembersPanel.jsx";
 import GuidedStart from "../guidedStart/GuidedStart.jsx";
+import ReportWorkspace from "../reports/ReportWorkspace.jsx";
 import useWideWorkspace from "./useWideWorkspace.js";
 import {
   watchReviewPreference,
@@ -76,14 +77,18 @@ export default function ProjectWorkspace({ project, user, onBack }) {
   }
   function guideTo(id) {
     guard(() => {
-      if (id === "project-promises") setPromisesOpen(true);
-      else
+      if (id === "project-promises") {
+        setView("promises");
+        setPromisesOpen(true);
+      } else
         setView(
-          id === "project-reviews"
-            ? "reviews"
-            : id === "project-candidates"
-              ? "candidates"
-              : "portfolio",
+          id === "project-settings"
+            ? "settings"
+            : id === "project-reviews"
+              ? "reviews"
+              : id === "project-candidates"
+                ? "candidates"
+                : "portfolio",
         );
       setFocusTarget({ id });
     });
@@ -106,9 +111,15 @@ export default function ProjectWorkspace({ project, user, onBack }) {
         </div>
         <Space wrap>
           <Button
-            aria-expanded={promisesOpen}
+            aria-expanded={promisesOpen && view !== "guide"}
             aria-controls="project-promises"
-            onClick={() => guard(() => setPromisesOpen(!promisesOpen))}
+            onClick={() =>
+              guard(() => {
+                if (view === "guide" || view === "promises")
+                  setView("portfolio");
+                setPromisesOpen(view === "guide" ? true : !promisesOpen);
+              })
+            }
           >
             Three Promises{promisesIncomplete ? " · Incomplete" : ""}
           </Button>
@@ -124,11 +135,11 @@ export default function ProjectWorkspace({ project, user, onBack }) {
         id="project-promises"
         tabIndex={-1}
         aria-label="Project promises"
-        hidden={!promisesOpen}
+        hidden={!promisesOpen || view === "guide" || view === "report"}
       >
         <ProjectBriefCard
           projectId={project.id}
-          userId={user.uid}
+          user={user}
           onIncomplete={setPromisesIncomplete}
         />
       </section>
@@ -147,6 +158,7 @@ export default function ProjectWorkspace({ project, user, onBack }) {
       <nav className="project-navigation" aria-label="Project workspace">
         {[
           ["portfolio", "Portfolio"],
+          ["report", "Project brief"],
           [
             "candidates",
             `Candidates${candidateCount === null ? "" : ` (${candidateCount})`}`,
@@ -164,6 +176,14 @@ export default function ProjectWorkspace({ project, user, onBack }) {
         ))}
       </nav>
       <GuidedStart
+        active={view === "guide"}
+        onActiveChange={(open) => {
+          setView(open ? "guide" : "portfolio");
+          setFocusTarget({
+            id: open ? "project-guide" : "project-assumptions",
+          });
+        }}
+        canInvite={project.creatorId === user.uid}
         reviewsEnabled={reviewsEnabled === true}
         projectId={project.id}
         userId={user.uid}
@@ -182,6 +202,7 @@ export default function ProjectWorkspace({ project, user, onBack }) {
         }}
         onCandidateCount={setCandidateCount}
       />
+      {view === "report" && <ReportWorkspace project={project} />}
       {view === "reviews" && (
         <section
           id="project-reviews"

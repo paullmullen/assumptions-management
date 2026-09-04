@@ -62,14 +62,14 @@ describe("formal review workflow", () => {
       target: { value: "Agree to test demand" },
     });
     fireEvent.click(
-      within(dialog).getByRole("button", { name: "Publish review" }),
+      within(dialog).getByRole("button", { name: "Save review" }),
     );
     await within(dialog).findByText(/Your draft is retained/);
     expect(screen.getByLabelText("Review notes (optional)")).toHaveValue(
       "Agree to test demand",
     );
     fireEvent.click(
-      within(dialog).getByRole("button", { name: "Publish review" }),
+      within(dialog).getByRole("button", { name: "Save review" }),
     );
     await waitFor(() => expect(publishReview).toHaveBeenCalledTimes(2));
     expect(publishReview.mock.calls[1][2]).toBe("draft-a");
@@ -110,11 +110,11 @@ it("retains an open draft and blocks publication when reviews are disabled remot
   expect(screen.getByLabelText("Review notes (optional)")).toHaveValue(
     "Keep this discussion",
   );
-  expect(screen.getByRole("button", { name: "Publish review" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Save review" })).toBeDisabled();
   expect(
     screen.getByRole("button", { name: "Refresh saved state" }),
   ).toBeDisabled();
   expect(publishReview).not.toHaveBeenCalled();
   rerender(<ReviewsPanel projectId="p" user={user} enabled />);
-  expect(screen.getByRole("button", { name: "Publish review" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Save review" })).toBeEnabled();
 });

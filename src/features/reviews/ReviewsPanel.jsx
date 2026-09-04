@@ -29,7 +29,7 @@ function ReviewContents({ snapshot, previous }) {
       <Typography.Paragraph>
         {previous
           ? `Compared with “${previous.title}”.`
-          : "First review: no prior published review to compare with."}
+          : "First review: no prior saved review to compare with."}
       </Typography.Paragraph>
       <Collapse
         items={[
@@ -202,7 +202,7 @@ export default function ReviewsPanel({ projectId, user, enabled = true }) {
     } catch (cause) {
       setError(
         cause.code
-          ? "The review could not be published. Your draft is retained; please retry."
+          ? "The review could not be saved. Your draft is retained; please retry."
           : cause.message,
       );
       setBusy(false);
@@ -213,14 +213,14 @@ export default function ReviewsPanel({ projectId, user, enabled = true }) {
       setReviews(await loadReviews(projectId));
     } catch {
       setError(
-        "Review published, but the list could not be refreshed. Please retry loading.",
+        "Review saved, but the list could not be refreshed. Please retry loading.",
       );
     } finally {
       setBusy(false);
     }
   }
 
-  useDraft("Unpublished review", {
+  useDraft("Unsaved review", {
     dirty: Boolean(draft),
     busy,
     discard: () => setDraft(null),
@@ -253,7 +253,7 @@ export default function ReviewsPanel({ projectId, user, enabled = true }) {
       {!enabled && (
         <Alert
           type="info"
-          title="Formal reviews are off or unavailable. Published reviews remain available below. An open draft is retained, but cannot be published until reviews are enabled."
+          title="Formal reviews are off or unavailable. Saved reviews remain available below. An open draft is retained, but cannot be saved until reviews are enabled."
         />
       )}
       {enabled && (
@@ -262,7 +262,7 @@ export default function ReviewsPanel({ projectId, user, enabled = true }) {
         </Button>
       )}
       {!reviews.length && (
-        <Typography.Paragraph>No published reviews yet.</Typography.Paragraph>
+        <Typography.Paragraph>No saved reviews yet.</Typography.Paragraph>
       )}
       {reviews.map((review) => (
         <div key={review.id}>
@@ -301,7 +301,7 @@ export default function ReviewsPanel({ projectId, user, enabled = true }) {
                 disabled={!enabled || !draft.title.trim()}
                 onClick={publish}
               >
-                Publish review
+                Save review
               </Button>
             </Space>
           )
@@ -311,7 +311,7 @@ export default function ReviewsPanel({ projectId, user, enabled = true }) {
           <>
             <Typography.Paragraph>
               Captured {new Date(draft.snapshot.capturedAt).toLocaleString()}.
-              Publish preserves the saved state shown below. Unsaved edits are
+              Saving preserves the saved state shown below. Unsaved edits are
               excluded; later project changes remain editable.
             </Typography.Paragraph>
             {!enabled && (
@@ -359,7 +359,7 @@ export default function ReviewsPanel({ projectId, user, enabled = true }) {
         {selected && (
           <>
             <Typography.Paragraph>
-              Published by {selected.publisherEmail} ·{" "}
+              Saved by {selected.publisherEmail} ·{" "}
               {selected.publishedAt.toDate().toLocaleString()}
             </Typography.Paragraph>
             <Typography.Paragraph style={{ whiteSpace: "pre-wrap" }}>

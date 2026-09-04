@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useId, useMemo } from "react";
 import { Card, Empty, Tag, Typography } from "antd";
 
 const { Paragraph, Text } = Typography;
@@ -65,7 +65,11 @@ export default function PortfolioChart({
   selectedId,
   onSelect,
   assumptionList,
+  readOnly = false,
+  emphasizedIds = [],
+  movement = [],
 }) {
+  const chartId = useId();
   const assessed = useMemo(() => assumptions.filter(isAssessed), [assumptions]);
   const unassessedCount = assumptions.length - assessed.length;
   const offsets = useMemo(() => collisionOffsets(assessed), [assessed]);
@@ -95,15 +99,15 @@ export default function PortfolioChart({
           ) : (
             <div className="portfolio-chart-scroll">
               <svg
-                aria-labelledby="portfolio-chart-title portfolio-chart-description"
+                aria-labelledby={`${chartId}-title ${chartId}-description`}
                 className="portfolio-chart"
                 role="group"
                 viewBox="0 0 720 500"
               >
-                <title id="portfolio-chart-title">
+                <title id={`${chartId}-title`}>
                   Assumption portfolio chart
                 </title>
-                <desc id="portfolio-chart-description">
+                <desc id={`${chartId}-description`}>
                   Criticality increases from left to right. Evidence strengthens
                   from top to bottom. The clearest unretired risk is in the
                   upper-right. Numbered points correspond to the assumption
@@ -228,6 +232,61 @@ export default function PortfolioChart({
                   Strength of supporting evidence
                 </text>
 
+                <defs>
+                  <marker
+                    id={`${chartId}-movement-arrow`}
+                    viewBox="0 0 10 10"
+                    refX="9"
+                    refY="5"
+                    markerWidth="6"
+                    markerHeight="6"
+                    orient="auto-start-reverse"
+                  >
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill="#536b60" />
+                  </marker>
+                </defs>
+                <g
+                  className="portfolio-movement"
+                  pointerEvents="none"
+                  aria-hidden="true"
+                >
+                  {movement
+                    .filter((row) => row.changed)
+                    .map((row) => {
+                      const dx =
+                        plotX(row.to.criticality) - plotX(row.from.criticality);
+                      const dy =
+                        plotY(row.to.evidence) - plotY(row.from.evidence);
+                      const distance = Math.hypot(dx, dy);
+                      const inset = Math.min(16, distance / 3);
+                      return (
+                        <g key={row.id}>
+                          <line
+                            x1={plotX(row.from.criticality)}
+                            y1={plotY(row.from.evidence)}
+                            x2={
+                              plotX(row.to.criticality) -
+                              (dx / distance) * inset
+                            }
+                            y2={
+                              plotY(row.to.evidence) - (dy / distance) * inset
+                            }
+                            stroke="#536b60"
+                            strokeWidth={row.id === selectedId ? 3 : 1.8}
+                            markerEnd={`url(#${chartId}-movement-arrow)`}
+                          />
+                          <circle
+                            cx={plotX(row.from.criticality)}
+                            cy={plotY(row.from.evidence)}
+                            r="6"
+                            fill="white"
+                            stroke="#536b60"
+                            strokeWidth="2"
+                          />
+                        </g>
+                      );
+                    })}
+                </g>
                 {assessed.map((assumption) => {
                   const index = assumptions.findIndex(
                     (item) => item.id === assumption.id,
@@ -237,7 +296,9 @@ export default function PortfolioChart({
                   const offset = offsets.get(assumption.id);
                   const x = originX + offset.x;
                   const y = originY + offset.y;
-                  const isSelected = selectedId === assumption.id;
+                  const isSelected =
+                    selectedId === assumption.id ||
+                    emphasizedIds.includes(assumption.id);
 
                   return (
                     <g key={assumption.id}>
@@ -253,15 +314,16 @@ export default function PortfolioChart({
                       <g
                         aria-label={`Assumption ${index + 1}: ${assumption.statement}. Criticality ${assumption.criticality}, evidence ${assumption.evidence}.`}
                         className={`portfolio-point${isSelected ? " portfolio-point-selected" : ""}`}
-                        aria-pressed={isSelected}
+                        aria-pressed={readOnly ? undefined : isSelected}
                         onClick={(event) =>
+                          !readOnly &&
                           onSelect(assumption.id, event.currentTarget)
                         }
                         onKeyDown={(event) =>
-                          selectFromKeyboard(event, assumption.id)
+                          !readOnly && selectFromKeyboard(event, assumption.id)
                         }
-                        role="button"
-                        tabIndex="0"
+                        role={readOnly ? "img" : "button"}
+                        tabIndex={readOnly ? undefined : 0}
                         transform={`translate(${x} ${y})`}
                       >
                         <circle r="10" />

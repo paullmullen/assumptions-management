@@ -103,14 +103,14 @@ export async function publishReview(user, projectId, reviewId, values) {
           JSON.stringify(canonical(expected))
       )
         throw new Error(
-          "This review was already published with different content. Close this draft and reload the published reviews.",
+          "This review was already saved with different content. Close this draft and reload the saved reviews.",
         );
       return;
     }
     const project = await transaction.get(doc(db, "projects", projectId));
     if (!project.exists() || project.data().formalReviewsEnabled === false)
       throw new Error(
-        "Formal reviews are turned off. Your draft is retained; ask the owner to enable reviews before publishing.",
+        "Formal reviews are turned off. Your draft is retained; ask the owner to enable reviews before saving.",
       );
     transaction.set(reference, {
       ...values,

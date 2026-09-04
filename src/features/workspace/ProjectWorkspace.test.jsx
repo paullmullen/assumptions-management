@@ -14,6 +14,13 @@ import * as services from "../../services.js";
 import * as preferences from "../reviews/reviewPreference.js";
 import * as reviews from "../reviews/reviewService.js";
 
+vi.mock("../reports/reportService.js", () => ({
+  loadReportSource: vi.fn(),
+  loadReportComparison: vi.fn(async () => null),
+  loadReportReviews: vi.fn(),
+  verifyReportAccess: vi.fn(),
+}));
+
 vi.mock("../reviews/reviewPreference.js", () => ({
   watchReviewPreference: vi.fn(),
   saveReviewPreference: vi.fn(),
@@ -210,10 +217,15 @@ it("protects promises when collapsing and preserves valid saves", async () => {
   click("Three Promises");
   click("Save and continue");
   await waitFor(() => expect(customer).not.toBeVisible());
-  expect(services.saveProjectBrief).toHaveBeenCalledWith("p", "owner", {
-    ...promises,
-    customerPromise: "Better customer value",
-  });
+  expect(services.saveProjectBrief).toHaveBeenCalledWith(
+    "p",
+    user,
+    {
+      ...promises,
+      customerPromise: "Better customer value",
+    },
+    promises,
+  );
 });
 it("protects candidate capture and adoption returns to the sole portfolio list", async () => {
   services.adoptCandidate.mockResolvedValue({
@@ -280,7 +292,7 @@ it("never publishes an unpublished review through the navigation guard", async (
   click("Start review");
   await screen.findByRole("dialog", { name: "Review current portfolio" });
   click("Cancel review");
-  expect(modal()).toHaveTextContent("Unpublished review");
+  expect(modal()).toHaveTextContent("Unsaved review");
   expect(
     within(modal()).queryByRole("button", { name: "Save and continue" }),
   ).not.toBeInTheDocument();
@@ -319,7 +331,9 @@ it("updates guide destinations to open the promises and candidate views", async 
   expect(
     screen.getByRole("region", { name: "Project promises" }),
   ).toHaveFocus();
+  click("Open guided start");
   click("Next");
+  click("Skip for now");
   click("Go to candidates");
   expect(
     screen.getByRole("region", { name: "Project candidates" }),
@@ -550,4 +564,60 @@ it("saves an adoption before switching to another candidate and keeps its drawer
     screen.getByRole("button", { name: "Adopt with scores" }),
   ).toBeVisible();
   expect(services.adoptCandidate).toHaveBeenCalledTimes(1);
+});
+
+it("opens guidance as its own view and protects edits before returning to it", async () => {
+  services.saveAssumptionDraft.mockRejectedValueOnce(new Error("offline"));
+  render(app());
+  await screen.findByRole("button", { name: /^Assumption 1:/ });
+  click("Open guided start");
+  expect(screen.getByRole("heading", { name: /1 of 6/ })).toBeVisible();
+  expect(
+    screen.queryByRole("button", { name: /^Assumption 1:/ }),
+  ).not.toBeInTheDocument();
+  click("Pause guidance");
+  fireEvent.click(point());
+  fireEvent.change(note(), { target: { value: "Keep this insight" } });
+  click("Open guided start");
+  expect(modal()).toBeInTheDocument();
+  click("Save and continue");
+  await screen.findByText(/Changes were not saved/);
+  expect(note()).toHaveValue("Keep this insight");
+  expect(
+    screen.queryByRole("heading", { name: /1 of 6/ }),
+  ).not.toBeInTheDocument();
+  click("Keep editing");
+  click("Open guided start");
+  click("Discard changes");
+  await screen.findByRole("heading", { name: /1 of 6/ });
+  expect(
+    screen.queryByRole("dialog", { name: /Assumption/ }),
+  ).not.toBeInTheDocument();
+  click("Go to promises");
+  expect(
+    screen.getByRole("region", { name: "Project promises" }),
+  ).toBeVisible();
+  expect(
+    screen.queryByRole("dialog", { name: /Assumption/ }),
+  ).not.toBeInTheDocument();
+});
+
+vi.mock("../candidates/boardService.js", () => ({
+  loadCandidateGroups: vi.fn(async () => []),
+  newBoardId: vi.fn(() => "new-board-id"),
+  saveCandidateGroup: vi.fn(),
+  combineCandidates: vi.fn(),
+  moveCandidate: vi.fn(),
+}));
+
+it("opens the owner's existing invitation controls from guided startup", async () => {
+  render(app());
+  await screen.findByRole("button", { name: /^Assumption 1:/ });
+  click("Open guided start");
+  click("Next");
+  click("Invite team members");
+  expect(
+    screen.getByRole("region", { name: "Project settings and access" }),
+  ).toBeVisible();
+  expect(screen.getByText("Owner membership controls")).toBeVisible();
 });

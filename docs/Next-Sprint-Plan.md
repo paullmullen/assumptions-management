@@ -19,11 +19,11 @@ The September 2 source audit still calls candidate consolidation the next slice.
 
 ## Priority update — Google sign-in before 2C
 
-The user chose **Continue with Google** to unblock testers without domain registration or SMTP2GO setup. Email/password remains available through Firebase's standard emails. Project contact is **mullenpaull@gmail.com**. Google sign-in and explicit account linking are implemented; provider setup, deployment, and real browser acceptance remain pending. See [Google sign-in](Google-Sign-In.md).
+The user chose **Continue with Google** to unblock testers without domain registration or SMTP2GO setup. Email/password remains available through Firebase's standard emails. Project contact is **mullenpaull@gmail.com**. Google sign-in and explicit account linking are accepted: the user enabled Google, reached the existing project, and confirmed both providers on the same account. Broader tester/mobile acceptance remains part of pilot readiness. See [Google sign-in](Google-Sign-In.md).
 
 The custom [authentication email implementation](Authentication-Email-Slice.md) is retained but deferred. Do not activate custom email delivery or deploy its Functions for this onboarding slice. No domain or SMTP2GO account is required for Google sign-in.
 
-Once Google onboarding is accepted, resume **2C — Guided experience**.
+**2C — Guided experience** is accepted. **3A — Complete wording history** is accepted. The user approved the **3B — One-page project brief** MVP design. The current/snapshot report is implemented; browser and print acceptance remain pending. See [Slice 3B](Workspace-Slice-3B.md). The user accepted Slice 3C. The feature baseline through reporting is complete. Cross-device, print, and operational pilot checks remain listed in [Pilot readiness](Pilot-Readiness.md).
 
 ## Sprint goal 1 — Make the portfolio the primary workspace
 
@@ -41,13 +41,13 @@ Start with a concrete workspace layout for review, then implement 1A and 1B befo
 
 Outcome: Teams can begin with guidance, score candidates as they adopt them, and choose whether to use formal reviews.
 
-| Slice                         | Deliverable                                                                | Acceptance criteria                                                                                                                                                                                                                                                                                                                                              |
-| ----------------------------- | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 2A. Project review preference | Owner-controlled “Use formal reviews” setting in project creation/settings | Setting is reversible. Existing projects retain reviews enabled. When disabled, normal editing/history/reporting continue and new review actions are hidden/blocked consistently. Prior snapshots remain available in history. Implemented new-project default: reviews off, with an explicit choice during setup.                                               |
-| 2B. Score during adoption     | Adoption opens scoring in the shared assumption drawer                     | Both 0–100 scores require deliberate user input; zero remains a valid score. Saving adopts and records initial scores atomically, with author/time and candidate provenance. Cancel leaves the candidate pending. Stale wording and concurrent adoption are handled safely. Existing unscored assumptions are not assigned invented scores.                      |
-| 2C. Guided experience         | Floating guide coordinated with the workspace                              | Reuse actual editors; focus/scroll to the appropriate section or open the relevant drawer. Support pause/resume and direct entry. Guide navigation never implies unsaved work was saved. Avoid overlay/focus conflicts with the assumption drawer; use a dedicated guided view at narrow widths if necessary. Keep existing methodology and blind-spot guidance. |
+| Slice                         | Deliverable                                                                | Acceptance criteria                                                                                                                                                                                                                                                                                                                         |
+| ----------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2A. Project review preference | Owner-controlled “Use formal reviews” setting in project creation/settings | Setting is reversible. Existing projects retain reviews enabled. When disabled, normal editing/history/reporting continue and new review actions are hidden/blocked consistently. Prior snapshots remain available in history. Implemented new-project default: reviews off, with an explicit choice during setup.                          |
+| 2B. Score during adoption     | Adoption opens scoring in the shared assumption drawer                     | Both 0–100 scores require deliberate user input; zero remains a valid score. Saving adopts and records initial scores atomically, with author/time and candidate provenance. Cancel leaves the candidate pending. Stale wording and concurrent adoption are handled safely. Existing unscored assumptions are not assigned invented scores. |
+| 2C. Guided experience         | Dedicated guided view coordinated with existing editors                    | Reuse actual editors; open and focus the appropriate workspace section. Support pause/resume and direct entry. Guide navigation never implies unsaved work was saved. Keep the guide separate from the assumption drawer at all screen widths. Keep existing methodology and blind-spot guidance.                                           |
 
-Proposed design: floating guidance on desktop, subject to layout review. A separate questionnaire page remains an alternative if the guide competes with the workspace. Cross-device guidance progress is not required for this increment.
+Implemented design: a dedicated guided view, using the plan’s separate-view alternative to avoid competing with the assumption drawer. One method step at a time links to the actual editor, with direct step selection, pause/resume, and browser-local progress. It is not a second set of forms. Cross-device guidance progress is not required for this increment.
 
 ## Sprint goal 3 — Preserve changes and communicate project status
 
@@ -65,7 +65,7 @@ For reporting, settle the page layout and selection rules using a representative
 Outcome: A small team can complete the workflow, return later, and trust that its work is retained.
 
 - Run the complete account → project → invitation → promises → candidates/scoring → insight → report → return journey.
-- Exercise both review modes, including publishing and comparing snapshots when enabled.
+- Exercise both review modes, including saving and comparing review snapshots when enabled.
 - Verify project isolation, removed-member access, attribution, concurrent edits, failed saves, and data persistence.
 - Validate keyboard navigation, focus, labels, contrast, chart interpretation without color, and narrow-screen layouts throughout development, then check the complete experience.
 - Have an unfamiliar team attempt guided setup and a facilitated team try a realistic session. Separate methodology confusion from interface problems. Fix blocking findings before broader pilot use.
@@ -95,3 +95,25 @@ Exit: no unresolved blocker involving lost work, unauthorized access, misleading
 ## Lower-priority discovery — visual candidate organization
 
 Compare a lightweight Miro-like candidate organization surface with a Miro API/SDK integration after the higher-priority MVP work. Consider facilitated collaboration, grouping, identity/access, data ownership, effort, and cost. No discovery has begun. Candidate capture/adoption is sufficient for MVP; merge/split and broader lifecycle work remain deferred.
+
+## Support mini-sprint — Owner-authorized access
+
+Replaces the earlier blanket coach read-all proposal. The owner opens Support, explicitly grants temporary read-only access, and shares a project reference with an authenticated support person. The reference identifies the project; it is not an access credential. Require an owner grant and an assigned support role. Include expiration, immediate revocation, contact details, and an owner-visible access record. Future support-role delegation must be separate from project editing and role management. No support permissions are implemented yet; active membership remains the current security boundary.
+
+## 3C — Changes since previous review
+
+Accepted by the user after implementation. Current reports compare with the latest saved formal review; a historical report compares only with an earlier saved review whose capture also precedes it. A checkbox can omit the comparison. Show dated counts of added assumptions, net changed score pairs, actual new insight descriptions, reworded assumptions, and changed promises. Selected rows show previous → current scores, new/wording flags, and new insight counts. Chart positions remain those of the report source. No prior baseline means No previous review. Missing historical insight data is Unknown, not zero. Reviews-off projects can use retained reviews. See [Slice 3C](Workspace-Slice-3C.md).
+
+Saved reviews preserve status, not approval. The team resolves disagreements through ordinary edits before saving a review. Standalone snapshots and individual change acceptance/rejection with an accepted baseline remain separate future work. Chart arrows are deferred. Pilot readiness follows report acceptance and resolution of tester blockers.
+
+## Guided-start follow-up — Invite project team members
+
+Add an optional step to the project startup wizard for inviting team members through the existing invitation flow. Explain who will gain access, allow Skip for now, and make inviting later easy to find. Respect the existing invitation permissions. Implemented after the candidate-board baseline; see [Invitations and movement](Invitations-and-Review-Movement.md).
+
+## Top-priority adjustment — Candidate grouping board
+
+The user prioritized candidate organization/combination/adoption above invitations and Support, approved a small built-in grouping board, and accepted the interactive mockup. The first implementation is now available for review: named groups, saved card order, drag and keyboard moves, combine with preserved originals, and existing scored adoption. See [Candidate grouping board](Candidate-Grouping-Board.md). Miro integration, infinite canvas, live cursors, split/uncombine, and broader lifecycle remain deferred. This explicitly reopens combine as a bounded feature; earlier statements deferring all merge work refer to the previously accepted MVP baseline.
+
+## Requested follow-ups — Guided invitations and review movement
+
+Implemented for review: optional owner-only invitation navigation in guided startup, and an opt-in portfolio overlay showing net movement from the latest saved review to the current displayed scores. No historical/approval workflow expansion. The report stays unchanged. See [delivery and acceptance](Invitations-and-Review-Movement.md). Support remains the next deferred mini-sprint.

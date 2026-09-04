@@ -1,3 +1,4 @@
+import { loadCandidateGroups } from "./boardService.js";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { App as AntApp } from "antd";
 import { beforeEach, expect, it, vi } from "vitest";
@@ -26,6 +27,7 @@ const candidate = {
 const onAdopt = vi.fn();
 beforeEach(() => {
   vi.resetAllMocks();
+  loadCandidateGroups.mockResolvedValue([]);
   loadCandidates.mockResolvedValue([candidate]);
 });
 async function open() {
@@ -113,3 +115,11 @@ it("validates bulk input and gives nonblocking wording hints", () => {
   expect(wordingHint("Interview customers")).toBe(true);
   expect(wordingHint("Customers will pay")).toBe(false);
 });
+
+vi.mock("./boardService.js", () => ({
+  loadCandidateGroups: vi.fn(async () => []),
+  newBoardId: vi.fn(() => "new-board-id"),
+  saveCandidateGroup: vi.fn(),
+  combineCandidates: vi.fn(),
+  moveCandidate: vi.fn(),
+}));

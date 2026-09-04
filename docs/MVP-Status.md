@@ -1,27 +1,42 @@
-# MVP status — 2026-09-03
+# MVP status — feature baseline accepted
 
-This reconciles the current source with the original backlog. Implemented does not imply every acceptance criterion in an epic is complete. The user has reported that basic formal reviews and collaboration work in the deployed development app; visual polish remains open.
+The user accepted Slice 3C. The planned feature sequence through reporting is complete and accepted. This is the baseline for subsequent adjustments. Pilot and production operational acceptance are distinct from feature acceptance; unobserved checks below are not marked passed.
 
-| Area                     | Current evidence                                                                                                                          | Remaining work                                                                                                                               |
-| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| Foundation and isolation | Verified-account flow, project creation/switching, membership rules and automated tests                                                   | Final complete workflow and operational acceptance                                                                                           |
-| Collaboration            | Email-addressed copyable invitations, acceptance, expiration, revocation, removal; user reports working                                   | Multiple owners and ownership transfer; automatic invitation email                                                                           |
-| Three Promises           | Editable and preserved in review snapshots                                                                                                | Every-edit immutable promise history is absent; current save overwrites the brief                                                            |
-| Guided start             | Optional five-step guidance, existing-editor navigation, browser-local resume, static blind-spot prompts                                  | Unfamiliar-team usability acceptance; no cross-device progress synchronization                                                               |
-| Candidate workshop       | Separate pending candidates, multiline entry, wording edits, explicit adoption, attribution, affirmative guidance, portfolio-size warning | Scored adoption (2B) implemented; merge/split and broader lifecycle deferred                                                                 |
-| Assessment               | Two-axis scoring, synchronized selection, chart and score editor                                                                          | Sorting by consequence, evidence, recent change, and attention priority is implemented; broader pilot acceptance remains                     |
-| Learning and management  | Insights, source URL/classification, score history, next step/help history                                                                | Multi-assumption insight relationships and supersession were deferred by the learning slice; statement edits lack per-edit immutable history |
-| Formal reviews           | Compare saved state, notes, publish/reopen immutable snapshots; user reports working                                                      | Review preference implemented; cross-device/pilot acceptance remains                                                                         |
-| Notifications            | Copyable invitations support manual sharing                                                                                               | Invitation delivery, activity notifications, notification preferences remain original backlog items                                          |
-| Pilot/release            | Automated application/rules checks and development deployment workflow                                                                    | Unfamiliar-team, accessibility, full multi-account return journey, and operational/production readiness acceptance                           |
+| Area                       | Delivered and accepted                                                           | Remaining                                                                          |
+| -------------------------- | -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Accounts                   | Google sign-in, explicit linking, retained email/password                        | New-tester/mobile OAuth check                                                      |
+| Projects and collaboration | Isolated projects, copyable recipient-bound invitations, membership removal      | Complete multi-account pilot journey                                               |
+| Portfolio                  | One synchronized list/chart, drawer, sorting, guarded drafts and conflicts       | Cross-device and keyboard acceptance                                               |
+| Promises and learning      | Immutable wording, score, insight, next-step/help history with attribution       | Earlier missing history cannot be reconstructed                                    |
+| Setup and candidates       | Optional dedicated guide, candidate capture and adoption with initial scores     | Unfamiliar-team trial; invitation step is backlog                                  |
+| Reviews                    | Optional formal reviews, immutable saved reviews, review comparisons             | Individual acceptance/rejection is deferred                                        |
+| Reporting                  | Current or saved-review source, one-page brief, optional since-review comparison | Browser/PDF layout checks across representative projects                           |
+| Operations                 | Source release and deployment instructions; automated checks                     | Recovery drill, environment separation and monitoring acceptance before production |
 
-The approved [Next sprint plan](Next-Sprint-Plan.md) is the plan of record. Slice 1A is implemented: Portfolio is the default project view; one active-assumption list is synchronized with the chart; Candidates, Reviews, and Settings & access are separate views; Three Promises are expandable; draft protection covers navigation and moved forms. See [Slice 1A delivery](Workspace-Slice-1A.md) for verification and limitations.
+## Verification for the accepted baseline
 
-Slice **1B — Assumption drawer** is implemented: one editable drawer, atomic saves, guarded closing/selection/navigation, and conflict review. See [Slice 1B](Workspace-Slice-1B.md) for required rule deployment, verification, and remaining browser acceptance. **1C — Portfolio sorting** is implemented with the user-approved chart-aligned attention rule; see [Slice 1C](Workspace-Slice-1C.md). **2A — Optional formal reviews** is implemented; see [Slice 2A](Workspace-Slice-2A.md). **2A is accepted. 2B — Score during candidate adoption** is implemented; see [Slice 2B](Workspace-Slice-2B.md). The user accepted **2B**. Next is **Google sign-in acceptance** to unblock tester onboarding, followed by **2C — Guided experience**. Google sign-in/account linking are implemented; console activation and live acceptance are pending. Custom email delivery is deferred. See [Google setup](Google-Sign-In.md). Candidate capture/adoption is sufficient for MVP. Merge/split and broader lifecycle work are deferred. Miro-like organization versus Miro integration is lower-priority discovery. Immutable wording/promise history, improved guidance, one-page reporting, and pilot readiness remain in the approved later goals.
+- 132 application tests and 79 Firestore rules/service tests passed in Slice 3C.
+- Formatting, lint, and production build passed in Slice 3C.
+- No application code changes in this closeout; those results remain applicable.
+- Google Auth emulator linking checks are recorded in [Pilot readiness](Pilot-Readiness.md).
+- User acceptance does not establish completion of every browser, accessibility, or recovery check. The earlier browser service blocked the local preview URL; no new visual result is claimed.
 
-## Prior guidance delivery verification
+## What comes next
 
-- Formatting, lint, application tests, production build, and Firestore rules regression suite.
-- No security schema change or new production dependency.
-- Manual guidance acceptance is listed in [Guided start](Guided-Start.md).
-- This audit is a source reconciliation, not a claim of complete production readiness.
+Use the short [pilot checklist](Pilot-Readiness.md), record findings, then make bounded adjustments. No production deployment has been performed. Custom SMTP delivery remains deferred; Google is the primary onboarding path and project contact is mullenpaull@gmail.com.
+
+Retained backlog:
+
+- Owner-authorized, expiring and revocable read-only support access, with a project reference, contact details, access history, and future support-role delegation. Replaces blanket administrator read-all access.
+- Optional invitation step in guided startup, with Skip for now and a way to invite later.
+- Standalone snapshots without formal reviews.
+- Individual change acceptance/rejection and an accepted baseline.
+- Miro-like organization versus Miro integration, merge/split, richer lifecycle, notifications, ownership transfer, and cross-device guide progress.
+
+The [next sprint plan](Next-Sprint-Plan.md) retains the detailed scope. Historical slice notes describe their original delivery state; this document is the current status.
+
+## Adjustment after the accepted baseline
+
+Candidate grouping is the user's top priority. The approved board mockup is implemented and awaiting user/visual acceptance. Named groups, order, atomic combination with preserved source records, and existing scored adoption are included. See [Candidate grouping board](Candidate-Grouping-Board.md). This approved combination slice supersedes blanket merge deferral; split and broader lifecycle remain deferred. Deploy Hosting and rules together.
+
+The candidate grouping board was accepted by the user. Guided team invitations and the optional movement-since-review portfolio overlay are now implemented for review. These supersede their earlier backlog entries. See [Invitations and movement](Invitations-and-Review-Movement.md); updating from the candidate board requires Hosting only.

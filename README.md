@@ -14,9 +14,23 @@ There is one active-assumption list beside the chart. Selecting a chart point or
 
 Closing/Escape, changing selection or project, signing out, and in-app browser Back/Forward protect unsaved work. Failed saves and conflicts retain the draft. A conflict shows latest saved values and requires explicit review before saving again. Revert requires confirmation. Browser refresh/close requests the native unsaved warning when supported; drafts are not crash recovery or offline persistence.
 
-See [Slice 1B delivery and acceptance checks](docs/Workspace-Slice-1B.md). **Deploy Hosting and Firestore rules together for this slice**, especially before creating assumptions with initial insights/management fields. The development deployment command below includes both. No production dependency was added. Immutable wording/promise history remains a later goal; current history covers insights, score changes, and next-step/help changes.
+See [Slice 1B delivery and acceptance checks](docs/Workspace-Slice-1B.md). **Deploy Hosting and Firestore rules together for this slice**, especially before creating assumptions with initial insights/management fields. The development deployment command below includes both. No production dependency was added. Immutable assumption wording and Three Promises history are now implemented in [Slice 3A](docs/Workspace-Slice-3A.md). Existing insight, score, and next-step/help history is preserved.
 
 Use **Sort assumptions** above the list to order by consequence, evidence, recent change, or attention priority (criticality minus evidence). Chart numbers and the open drawer stay attached to the same assumptions. History is labeled **Newest first** with separated entries. See [Slice 1C](docs/Workspace-Slice-1C.md); updating from 1B requires Hosting only.
+
+## One-page project brief
+
+Open **Project brief** to report on current saved state or a saved review. Select up to four discussion items, optionally shorten labeled report-only excerpts, then use **Print / Save as PDF**. The preview blocks export when text overflows. Update from 3A with Hosting only. See [Slice 3B usage and acceptance](docs/Workspace-Slice-3B.md); browser/PDF acceptance remains pending.
+
+## Wording and promise history
+
+Assumption wording changes appear in the drawer’s existing history, with previous/new text, author, and time. **Promise wording history** is expandable below the Three Promises form. Promise conflicts retain your draft and require review of the latest saved text. History works with formal reviews off. Earlier unrecorded changes are not reconstructed.
+
+**Deploy Hosting and Firestore rules together for Slice 3A** and refresh open tabs. See [deployment and acceptance](docs/Workspace-Slice-3A.md).
+
+## Guided start
+
+**Open guided start** opens a separate, optional method guide. Choose a step or use Previous/Next, then open the actual promises, candidates, portfolio, or reviews editor. Reopen the guide to return to your remembered step. Pause/Finish returns to the portfolio; neither action saves editor data or marks setup complete. Progress is remembered per account and project in this browser. See [Slice 2C](docs/Workspace-Slice-2C.md). Updating from the Google sign-in release requires Hosting only.
 
 ## Project collaboration
 
@@ -24,7 +38,7 @@ Owners can create email-addressed invitation links, inspect members, revoke invi
 
 ## Formal reviews
 
-Use **Formal reviews → Start review** to inspect saved state and changes since the previous published review. Add notes and publish a preserved snapshot with publisher and time. Refresh saved state before publishing when needed. Earlier reviews remain unchanged while ordinary project editing continues. See [Formal reviews](docs/Formal-Reviews.md) for scope, limits, and acceptance checks. Deploy **both Hosting and Firestore rules** for this feature.
+Use **Formal reviews → Start review** to inspect saved state and changes since the previous saved review. Add notes and save a preserved review with author and time. Refresh saved state before saving when needed. Earlier reviews remain unchanged while ordinary project editing continues. See [Formal reviews](docs/Formal-Reviews.md) for scope, limits, and acceptance checks. Deploy **both Hosting and Firestore rules** for this feature.
 
 ## Development setup
 
@@ -103,3 +117,17 @@ New projects default to reviews off, with an explicit creation choice. Owners ca
 ## Branded authentication emails
 
 Verification/resend and password reset can use Firebase-generated links and SMTP2GO delivery. The approved backend SDKs have a separate Node 22 package. Follow [Authentication email setup](docs/Authentication-Email-Setup.md) before enabling custom delivery. New commands: `npm run deploy:email`, `npm run test:email-core`, and `npm run test:email`. The default frontend delivery remains native until explicitly switched to custom.
+
+Slice 3C adds optional changes since the previous review to the brief, with net score changes and insight counts. See [Slice 3C](docs/Workspace-Slice-3C.md). Updating from 3B requires Hosting only.
+
+## Accepted MVP baseline
+
+Slices through 3C are accepted. Start with [Pilot readiness and tester checklist](docs/Pilot-Readiness.md) for the complete journey and remaining operational checks. [MVP status](docs/MVP-Status.md) is the current status; older slice documents retain their delivery history. This closeout changes documentation only and requires no app deployment when 3C is already installed. Further UX adjustments can build on this baseline.
+
+## Candidate grouping board
+
+Candidates now defaults to a grouping board, with List still available. Add named groups, move/reorder cards, select 2–8 candidates to combine while preserving their source records, and adopt through the existing scoring drawer. Refresh to see collaborators' changes. **Deploy Hosting and Firestore rules together.** See [usage, deployment, and acceptance](docs/Candidate-Grouping-Board.md).
+
+## Guided invitations and review movement
+
+Guided start now includes an optional Invite your team step linked to the owner's existing access controls. Portfolio offers Show movement since last review, with outlined prior positions, net arrows, and exact movement details. Updating from the candidate-board release requires Hosting only. See [usage and acceptance](docs/Invitations-and-Review-Movement.md).

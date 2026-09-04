@@ -500,3 +500,22 @@ section[id^="project-"] {
   margin-top: 16px;
   padding-top: 16px;
 }
+
+.guide-step-select {
+  display: block;
+  width: 100%;
+  max-width: 440px;
+  margin: 8px 0 24px;
+}
+#guided-start-content {
+  max-width: 760px;
+  margin: 24px auto 8px;
+}
+#guided-start-content h2:focus {
+  outline: 2px solid #1d6a55;
+  outline-offset: 4px;
+}
+
+.guided-start-launch {
+  margin-bottom: 20px;
+}
