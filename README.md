@@ -131,3 +131,25 @@ Candidates now defaults to a grouping board, with List still available. Add name
 ## Guided invitations and review movement
 
 Guided start now includes an optional Invite your team step linked to the owner's existing access controls. Portfolio offers Show movement since last review, with outlined prior positions, net arrows, and exact movement details. Updating from the candidate-board release requires Hosting only. See [usage and acceptance](docs/Invitations-and-Review-Movement.md).
+
+### Project welcome and methodology credit
+
+Every person sees a short welcome when first opening each project, including
+project creators and members arriving through invitations. It introduces the
+five-step approach and credits Vijay Govindarajan and Chris Trimble's _The Other
+Side of Innovation: Solving the Execution Challenge_ (2010). The copy distinguishes
+that inspiration from the application's adaptations, including Three Promises.
+
+**Start working** records a version-1 visit at
+`users/{uid}/projectWelcome/{projectId}` with a server timestamp. This personal
+record follows the user across browsers and does not change membership. Existing
+members with no record also see the introduction once after this update. A
+returning member with a previous record is not forced through it again.
+**About the methodology** reopens it in the workspace and respects unsaved edits.
+If checking or saving the visit fails, **Continue for now** allows work to proceed
+without claiming the visit was saved. The introduction can appear again later.
+
+Deploy the updated `firestore.rules` with this release: only the authenticated,
+verified active member can read/write their own welcome record. No new backend
+function or production dependency is required. No deployment is performed by
+installing this source archive.

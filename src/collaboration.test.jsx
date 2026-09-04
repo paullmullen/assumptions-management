@@ -87,3 +87,8 @@ describe("collaboration navigation", () => {
     ).not.toBeInTheDocument();
   });
 });
+
+vi.mock("./features/welcome/welcomeService.js", () => ({
+  hasSeenWelcome: vi.fn(async () => true),
+  rememberWelcome: vi.fn(),
+}));

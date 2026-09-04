@@ -1,0 +1,102 @@
+.project-welcome {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 12px 0;
+  overflow-wrap: anywhere;
+}
+.welcome-introduction {
+  max-width: 950px;
+  margin-bottom: 24px;
+}
+.welcome-eyebrow {
+  color: #376653;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+.welcome-introduction h1.ant-typography {
+  margin: 12px 0 12px;
+  font-size: clamp(28px, 3vw, 40px);
+  line-height: 1.2;
+}
+.welcome-lead {
+  color: #52635b;
+  font-size: 18px;
+}
+.welcome-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: 64px;
+  align-items: start;
+}
+.welcome-steps {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 16px;
+}
+.welcome-steps li {
+  display: flex;
+  gap: 18px;
+}
+.welcome-step-number {
+  flex: 0 0 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #e2eee7;
+  color: #245441;
+  display: grid;
+  place-items: center;
+  font-size: 15px;
+  font-weight: 600;
+}
+.welcome-steps h2.ant-typography {
+  font-size: 18px;
+  margin: 0 0 5px;
+}
+.welcome-steps .ant-typography {
+  margin-bottom: 0;
+}
+.welcome-source {
+  padding: 24px;
+  background: #eaf1ec;
+  border-radius: 12px;
+}
+.welcome-source h2.ant-typography {
+  font-size: 25px;
+  line-height: 1.2;
+  margin-top: 18px;
+  margin-bottom: 8px;
+}
+.welcome-authors {
+  margin: 16px 0;
+}
+.welcome-source > .ant-typography:last-child {
+  margin-bottom: 0;
+}
+.welcome-footer {
+  margin-top: 24px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+@media (max-width: 760px) {
+  .welcome-columns {
+    grid-template-columns: 1fr;
+    gap: 28px;
+  }
+  .welcome-introduction {
+    margin-bottom: 24px;
+  }
+  .welcome-source {
+    padding: 24px;
+  }
+}
+
+.welcome-entry {
+  padding-top: 24px;
+  padding-bottom: 24px;
+}

@@ -6,6 +6,7 @@ import ReviewsPanel from "../reviews/ReviewsPanel.jsx";
 import MembersPanel from "../members/MembersPanel.jsx";
 import GuidedStart from "../guidedStart/GuidedStart.jsx";
 import ReportWorkspace from "../reports/ReportWorkspace.jsx";
+import ProjectWelcome from "../welcome/ProjectWelcome.jsx";
 import useWideWorkspace from "./useWideWorkspace.js";
 import {
   watchReviewPreference,
@@ -110,14 +111,23 @@ export default function ProjectWorkspace({ project, user, onBack }) {
           )}
         </div>
         <Space wrap>
+          <Button onClick={() => navigate("welcome")}>
+            About the methodology
+          </Button>
           <Button
             aria-expanded={promisesOpen && view !== "guide"}
             aria-controls="project-promises"
             onClick={() =>
               guard(() => {
-                if (view === "guide" || view === "promises")
+                if (
+                  view === "guide" ||
+                  view === "welcome" ||
+                  view === "promises"
+                )
                   setView("portfolio");
-                setPromisesOpen(view === "guide" ? true : !promisesOpen);
+                setPromisesOpen(
+                  view === "guide" || view === "welcome" ? true : !promisesOpen,
+                );
               })
             }
           >
@@ -135,7 +145,12 @@ export default function ProjectWorkspace({ project, user, onBack }) {
         id="project-promises"
         tabIndex={-1}
         aria-label="Project promises"
-        hidden={!promisesOpen || view === "guide" || view === "report"}
+        hidden={
+          !promisesOpen ||
+          view === "guide" ||
+          view === "report" ||
+          view === "welcome"
+        }
       >
         <ProjectBriefCard
           projectId={project.id}
@@ -175,20 +190,28 @@ export default function ProjectWorkspace({ project, user, onBack }) {
           </Button>
         ))}
       </nav>
-      <GuidedStart
-        active={view === "guide"}
-        onActiveChange={(open) => {
-          setView(open ? "guide" : "portfolio");
-          setFocusTarget({
-            id: open ? "project-guide" : "project-assumptions",
-          });
-        }}
-        canInvite={project.creatorId === user.uid}
-        reviewsEnabled={reviewsEnabled === true}
-        projectId={project.id}
-        userId={user.uid}
-        onNavigate={guideTo}
-      />
+      {view === "welcome" && (
+        <ProjectWelcome
+          project={project}
+          onStart={() => navigate("portfolio")}
+        />
+      )}
+      {view !== "welcome" && (
+        <GuidedStart
+          active={view === "guide"}
+          onActiveChange={(open) => {
+            setView(open ? "guide" : "portfolio");
+            setFocusTarget({
+              id: open ? "project-guide" : "project-assumptions",
+            });
+          }}
+          canInvite={project.creatorId === user.uid}
+          reviewsEnabled={reviewsEnabled === true}
+          projectId={project.id}
+          userId={user.uid}
+          onNavigate={guideTo}
+        />
+      )}
       <AssumptionsPanel
         projectId={project.id}
         user={user}

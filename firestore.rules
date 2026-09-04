@@ -119,6 +119,16 @@ service cloud.firestore {
       allow read: if request.auth != null && request.auth.uid == userId;
       allow update, delete: if false;
 
+      // Personal onboarding state never changes membership or project access.
+      match /projectWelcome/{projectId} {
+        allow get: if isVerifiedUser() && request.auth.uid == userId && isActiveMember(projectId);
+        allow create, update: if isVerifiedUser() && request.auth.uid == userId && isActiveMember(projectId)
+          && request.resource.data.keys().hasOnly(['version', 'seenAt'])
+          && request.resource.data.version == 1
+          && request.resource.data.seenAt == request.time;
+        allow list, delete: if false;
+      }
+
       match /projectMemberships/{projectId} {
         allow get: if isVerifiedUser() && (request.auth.uid == userId || isProjectOwner(projectId));
         allow list: if isVerifiedUser() && request.auth.uid == userId;

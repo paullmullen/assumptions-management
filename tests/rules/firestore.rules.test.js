@@ -3264,3 +3264,55 @@ describe("Candidate grouping and atomic combination", () => {
     );
   });
 });
+
+describe("Personal project welcome", () => {
+  it("persists an active member's visit without changing their membership", async () => {
+    await seedPrivateProject();
+    serviceDb = verifiedContext(ownerId).firestore();
+    const { hasSeenWelcome, rememberWelcome } =
+      await import("../../src/features/welcome/welcomeService.js");
+    expect(await hasSeenWelcome(ownerId, projectId)).toBe(false);
+    await assertSucceeds(rememberWelcome(ownerId, projectId));
+    expect(await hasSeenWelcome(ownerId, projectId)).toBe(true);
+    await assertSucceeds(rememberWelcome(ownerId, projectId));
+    expect(
+      (
+        await adminDocument(`users/${ownerId}/projectMemberships/${projectId}`)
+      ).data().role,
+    ).toBe("owner");
+  });
+  it("rejects other users, nonmembers, invalid fields, and removed members", async () => {
+    await seedPrivateProject();
+    const owner = verifiedContext(ownerId).firestore();
+    const other = verifiedContext(otherUserId).firestore();
+    const path = `users/${ownerId}/projectWelcome/${projectId}`;
+    const value = () => ({ version: 1, seenAt: serverTimestamp() });
+    await assertFails(setDoc(doc(other, path), value()));
+    await assertFails(getDoc(doc(other, path)));
+    await assertFails(
+      setDoc(
+        doc(other, `users/${otherUserId}/projectWelcome/${projectId}`),
+        value(),
+      ),
+    );
+    await assertFails(setDoc(doc(owner, path), { ...value(), role: "owner" }));
+    await assertFails(
+      setDoc(doc(owner, path), { version: 2, seenAt: serverTimestamp() }),
+    );
+    await assertFails(
+      setDoc(doc(owner, path), { version: 1, seenAt: Timestamp.fromMillis(0) }),
+    );
+    await assertSucceeds(setDoc(doc(owner, path), value()));
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(
+        doc(
+          context.firestore(),
+          `users/${ownerId}/projectMemberships/${projectId}`,
+        ),
+        { active: false },
+      );
+    });
+    await assertFails(getDoc(doc(owner, path)));
+    await assertFails(setDoc(doc(owner, path), value()));
+  });
+});

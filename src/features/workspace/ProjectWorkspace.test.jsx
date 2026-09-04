@@ -621,3 +621,24 @@ it("opens the owner's existing invitation controls from guided startup", async (
   ).toBeVisible();
   expect(screen.getByText("Owner membership controls")).toBeVisible();
 });
+
+it("reopens the methodology and protects an unfinished insight", async () => {
+  render(app());
+  await screen.findByRole("button", { name: /^Assumption 1:/ });
+  fireEvent.click(point());
+  fireEvent.change(note(), { target: { value: "Keep my draft" } });
+  click("About the methodology");
+  expect(modal()).toBeInTheDocument();
+  click("Keep editing");
+  expect(note()).toHaveValue("Keep my draft");
+  click("About the methodology");
+  click("Discard changes");
+  expect(
+    screen.getByRole("heading", { name: "Welcome to Pilot project" }),
+  ).toBeVisible();
+  expect(
+    screen.queryByRole("button", { name: "Open guided start" }),
+  ).not.toBeInTheDocument();
+  click("Start working");
+  expect(point()).toBeVisible();
+});

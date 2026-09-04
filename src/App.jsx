@@ -24,7 +24,7 @@ import {
 } from "firebase/auth";
 import GoogleAccountButton from "./GoogleAccountButton.jsx";
 import { continueWithGoogle } from "./googleAuth.js";
-import ProjectWorkspace from "./features/workspace/ProjectWorkspace.jsx";
+import ProjectEntry from "./features/welcome/ProjectEntry.jsx";
 import DraftProvider from "./features/workspace/DraftProvider.jsx";
 import useProjectNavigation from "./features/workspace/useProjectNavigation.js";
 import { useNavigationGuard } from "./features/workspace/draftContext.js";
@@ -523,7 +523,7 @@ function Application() {
           }}
         />
       ) : project ? (
-        <ProjectWorkspace
+        <ProjectEntry
           key={`${user.uid}:${project.id}`}
           onBack={() => routeTo("/projects")}
           project={project}
