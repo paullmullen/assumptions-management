@@ -440,7 +440,7 @@ export default function AssumptionDrawer({
               onChange={(e) => changeInsight("sourceUrl", e.target.value)}
             />
             <label htmlFor={`${fieldId}-classification`}>
-              Classification (optional)
+              Why did this assumption change?
             </label>
             <Select
               id={`${fieldId}-classification`}
