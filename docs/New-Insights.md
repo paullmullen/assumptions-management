@@ -8,7 +8,7 @@ Save accepts any of these:
 - A score change alone, with no insight required.
 - Both an insight and score changes, committed atomically.
 
-An insight alone does not write to the parent assumption, change its scores, or alter its update timestamp. When edited scores are incomplete or invalid, restore them or finish both scores before saving; the application does not silently discard score edits. Whitespace-only notes do not enable Save. A source URL and classification (Evidence, Revised judgment, or Mitigation / project change) remain optional. Optional metadata requires a description.
+An insight alone does not write to the parent assumption, change its scores, or alter its update timestamp. When edited scores are incomplete or invalid, restore them or finish both scores before saving; the application does not silently discard score edits. Whitespace-only notes do not enable Save. A source URL and classification (Evidence, Revised judgment, or Mitigation / project change) remain optional. Optional metadata requires a description when it is saved without a wording, score, or management change; classification can explain one of those changes without a separate description.
 
 Author and date are recorded automatically. The visible username is the signed-in account email, with UID and a server timestamp for attribution. Recorded insights appear newest first. Loading the history is independent of enabling Save. Permission-denied errors are distinguished from general failures, and failed saves retain drafts.
 
