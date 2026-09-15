@@ -83,6 +83,9 @@ it("opens one immediately editable drawer from chart or list, keeping selection 
   await openFirst();
   expect(screen.getAllByLabelText("Assumption")).toHaveLength(1);
   expect(screen.getAllByLabelText("New insight (optional)")).toHaveLength(1);
+  expect(
+    screen.getByLabelText("Why did this assumption change?"),
+  ).toBeInTheDocument();
   expect(screen.getByRole("dialog", { name: "Assumption 1" })).toHaveAttribute(
     "aria-modal",
     "false",

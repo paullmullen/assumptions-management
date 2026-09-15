@@ -462,7 +462,10 @@ match /assumptions/{assumptionId} {
       && (!('managementChange' in request.resource.data) || validManagementChange(request.resource.data, insightId))
       && (!('scoreChange' in request.resource.data) || validScoreChange(request.resource.data, insightId))
       && (!('sourceUrl' in request.resource.data) && !('classification' in request.resource.data)
-        || 'description' in request.resource.data)
+        || 'description' in request.resource.data
+        || 'scoreChange' in request.resource.data
+        || 'managementChange' in request.resource.data
+        || 'wordingChange' in request.resource.data)
       && request.resource.data.createdBy == request.auth.uid
       && request.resource.data.authorEmail == request.auth.token.email
       && request.resource.data.createdAt == request.time

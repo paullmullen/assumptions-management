@@ -808,6 +808,25 @@ describe("Score notes service with Firestore rules", () => {
     });
     expect(entries.docs[0].data().createdAt).toBeInstanceOf(Timestamp);
   });
+  it("the unified save allows classification alone when a score changes", async () => {
+    const baseline = (await getDoc(doc(serviceDb, parent))).data();
+    const entry = await saveAssumptionDraft(
+      user,
+      projectId,
+      "score-note",
+      baseline,
+      { ...baseline, evidence: 30 },
+      { classification: "Revised judgment" },
+    );
+    expect(entry.insight).toMatchObject({
+      classification: "Revised judgment",
+      scoreChange: {
+        from: { criticality: 80, evidence: 20 },
+        to: { criticality: 80, evidence: 30 },
+      },
+    });
+    expect(entry.insight.description).toBeUndefined();
+  });
   it("the unified save supports insights on an unassessed assumption", async () => {
     const ref = doc(serviceDb, `projects/${projectId}/assumptions/unassessed`);
     await setDoc(ref, {

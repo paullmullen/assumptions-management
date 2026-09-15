@@ -45,7 +45,9 @@ export function prepareAssumptionDraft(baseline, draft, insight) {
     (insight.description?.trim() ||
       insight.sourceUrl?.trim() ||
       insight.classification)
-      ? normalizeInsight(insight)
+      ? normalizeInsight(insight, {
+          allowEmptyDescription: Object.keys(changes).length > 0,
+        })
       : null;
   return { saved, values, changes, scoresChanged, entry };
 }

@@ -27,4 +27,12 @@ describe("insight validation", () => {
     ])
       expect(() => normalizeInsight(values)).toThrow();
   });
+  it("allows classification without a description when it explains a change", () => {
+    expect(
+      normalizeInsight(
+        { description: "", classification: "Revised judgment" },
+        { allowEmptyDescription: true },
+      ),
+    ).toEqual({ classification: "Revised judgment" });
+  });
 });
